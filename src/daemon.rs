@@ -302,7 +302,7 @@ impl Daemon {
         }
         let blockchain_info = daemon.getblockchaininfo()?;
         info!("{:?}", blockchain_info);
-        if blockchain_info.initialblockdownload == true {
+        if blockchain_info.chain != "regtest" && blockchain_info.initialblockdownload == true {
             bail!(ErrorKind::Connection(
                 "wait until bitcoin is synced (i.e. initialblockdownload = false)".to_owned()
             ))
