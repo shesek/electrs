@@ -1,5 +1,9 @@
-use bitcoin::blockdata::block::Block;
-use bitcoin::blockdata::transaction::Transaction;
+#[cfg(not(feature = "elements"))]
+use bitcoin::{Block, Transaction};
+
+#[cfg(feature = "elements")]
+use elements::{confidential, Block, Transaction};
+
 use bitcoin::network::serialize::deserialize;
 use bitcoin::util::hash::Sha256dHash;
 use crypto::digest::Digest;
@@ -252,11 +256,20 @@ impl Query {
         let txn_id = t.txn.txid();
         for (index, output) in t.txn.output.iter().enumerate() {
             if compute_script_hash(&output.script_pubkey[..]) == script_hash {
+                #[cfg(not(feature = "elements"))]
+                let value = output.value;
+
+                #[cfg(feature = "elements")]
+                let value = match output.value {
+                    confidential::Value::Explicit(val) => val,
+                    _ => 0,
+                };
+
                 result.push(FundingOutput {
                     txn_id: txn_id,
                     height: t.height,
                     output_index: index,
-                    value: output.value,
+                    value: value,
                 })
             }
         }

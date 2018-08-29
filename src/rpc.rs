@@ -1,4 +1,10 @@
-use bitcoin::blockdata::transaction::Transaction;
+#[cfg(not(feature = "elements"))]
+use bitcoin::Transaction;
+
+#[cfg(feature = "elements")]
+use elements::Transaction;
+
+
 use bitcoin::network::serialize::{deserialize, serialize};
 use bitcoin::util::address::Address;
 use bitcoin::util::hash::Sha256dHash;
@@ -59,6 +65,8 @@ fn address_from_value(val: Option<&Value>) -> Result<Address> {
     Address::from_str(addr).chain_err(|| format!("invalid address {}", addr))
 }
 
+
+#[cfg(not(feature = "elements"))]
 fn jsonify_header(entry: &HeaderEntry) -> Value {
     let header = entry.header();
     json!({
@@ -71,6 +79,20 @@ fn jsonify_header(entry: &HeaderEntry) -> Value {
         "nonce": header.nonce
     })
 }
+
+#[cfg(feature = "elements")]
+fn jsonify_header(entry: &HeaderEntry) -> Value {
+    let header = entry.header();
+    json!({
+        "block_height": entry.height(),
+        "version": header.version,
+        "prev_block_hash": header.prev_blockhash.be_hex_string(),
+        "merkle_root": header.merkle_root.be_hex_string(),
+        "timestamp": header.time,
+    })
+}
+
+
 
 struct Connection {
     query: Arc<Query>,

@@ -33,6 +33,9 @@ extern crate serde_derive;
 #[macro_use]
 extern crate serde_json;
 
+#[cfg(feature = "elements")]
+extern crate elements;
+
 pub mod app;
 pub mod bulk;
 pub mod config;

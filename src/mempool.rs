@@ -1,4 +1,9 @@
-use bitcoin::blockdata::transaction::Transaction;
+#[cfg(not(feature = "elements"))]
+use bitcoin::Transaction;
+
+#[cfg(feature = "elements")]
+use elements::Transaction;
+
 use bitcoin::util::hash::Sha256dHash;
 use hex;
 use std::collections::BTreeMap;

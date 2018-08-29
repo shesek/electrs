@@ -1,9 +1,14 @@
-use base64;
-use bitcoin::blockdata::block::{Block, BlockHeader};
-use bitcoin::blockdata::transaction::Transaction;
-use bitcoin::network::serialize::BitcoinHash;
-use bitcoin::network::serialize::{deserialize, serialize};
+
+#[cfg(not(feature = "elements"))]
+use bitcoin::{Block, BlockHeader, Transaction};
+
+#[cfg(feature = "elements")]
+use elements::{Block, BlockHeader, Transaction};
+
+use bitcoin::network::serialize::{BitcoinHash, deserialize, serialize};
+
 use bitcoin::util::hash::Sha256dHash;
+use base64;
 use glob;
 use hex;
 use serde_json::{from_str, from_value, Value};
@@ -25,6 +30,8 @@ pub enum Network {
     Mainnet,
     Testnet,
     Regtest,
+    Liquid,
+    LiquidRegtest,
 }
 
 fn parse_hash(value: &Value) -> Result<Sha256dHash> {
@@ -100,9 +107,8 @@ pub struct BlockchainInfo {
     blocks: u32,
     headers: u32,
     bestblockhash: String,
-    size_on_disk: u64,
     pruned: bool,
-    initialblockdownload: bool,
+    #[cfg(not(feature = "elements"))] initialblockdownload: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -309,11 +315,15 @@ impl Daemon {
         }
         let blockchain_info = daemon.getblockchaininfo()?;
         info!("{:?}", blockchain_info);
-        if blockchain_info.initialblockdownload == true {
-            bail!(ErrorKind::Connection(
+
+        #[cfg(not(feature = "elements"))] {
+            if blockchain_info.initialblockdownload == true {
+                bail!(ErrorKind::Connection(
                 "wait until bitcoin is synced (i.e. initialblockdownload = false)".to_owned()
             ))
+            }
         }
+
         if blockchain_info.pruned == true {
             bail!("pruned node is not supported (use '-prune=0' bitcoind flag)".to_owned())
         }
@@ -350,6 +360,8 @@ impl Daemon {
             Network::Mainnet => 0xD9B4BEF9,
             Network::Testnet => 0x0709110B,
             Network::Regtest => 0xDAB5BFFA,
+            Network::Liquid => 0xDBB5BFFA,
+            Network::LiquidRegtest => 0xDBB5BFFA,
         }
     }
 
@@ -477,11 +489,15 @@ impl Daemon {
         blockhash: Option<Sha256dHash>,
     ) -> Result<Transaction> {
         let mut args = json!([txhash.be_hex_string(), /*verbose=*/ false]);
-        if let Some(blockhash) = blockhash {
-            args.as_array_mut()
-                .unwrap()
-                .push(json!(blockhash.be_hex_string()));
+
+        #[cfg(not(feature = "elements"))] {
+            if let Some(blockhash) = blockhash {
+                args.as_array_mut()
+                    .unwrap()
+                    .push(json!(blockhash.be_hex_string()));
+            }
         }
+
         tx_from_value(self.request("getrawtransaction", args)?)
     }
 
@@ -600,7 +616,7 @@ impl Daemon {
             let header = self
                 .getblockheader(&blockhash)
                 .chain_err(|| format!("failed to get {} header", blockhash))?;
-            new_headers.push(header);
+            new_headers.push(header.clone());
             blockhash = header.prev_blockhash;
         }
         trace!("downloaded {} block headers", new_headers.len());

@@ -1,4 +1,10 @@
-use bitcoin::blockdata::block::Block;
+#[cfg(not(feature = "elements"))]
+use bitcoin::Block;
+
+#[cfg(feature = "elements")]
+use elements::Block;
+
+
 use bitcoin::network::serialize::BitcoinHash;
 use bitcoin::network::serialize::SimpleDecoder;
 use bitcoin::network::serialize::{deserialize, RawDecoder};
