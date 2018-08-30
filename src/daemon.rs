@@ -30,8 +30,8 @@ pub enum Network {
     Mainnet,
     Testnet,
     Regtest,
-    Liquid,
-    LiquidRegtest,
+    Elements,
+    ElementsRegtest,
 }
 
 fn parse_hash(value: &Value) -> Result<Sha256dHash> {
@@ -360,8 +360,8 @@ impl Daemon {
             Network::Mainnet => 0xD9B4BEF9,
             Network::Testnet => 0x0709110B,
             Network::Regtest => 0xDAB5BFFA,
-            Network::Liquid => 0xDBB5BFFA,
-            Network::LiquidRegtest => 0xDBB5BFFA,
+            Network::Elements => 0xDBB5BFFA,
+            Network::ElementsRegtest => 0xDBB5BFFA,
         }
     }
 

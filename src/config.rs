@@ -99,8 +99,8 @@ impl Config {
             "mainnet" => Network::Mainnet,
             "testnet" => Network::Testnet,
             "regtest" => Network::Regtest,
-            "liquid" => Network::Liquid,
-            "liquidregtest" => Network::LiquidRegtest,
+            "elements" => Network::Elements,
+            "elementsregtest" => Network::ElementsRegtest,
             _ => panic!("unsupported Bitcoin network: {:?}", network_name),
         };
         let db_dir = Path::new(m.value_of("db_dir").unwrap_or("./db"));
@@ -110,22 +110,22 @@ impl Config {
             Network::Mainnet => 8332,
             Network::Testnet => 18332,
             Network::Regtest => 18443,
-            Network::Liquid => 10099,
-            Network::LiquidRegtest => 7041,
+            Network::Elements => 10099,
+            Network::ElementsRegtest => 7041,
         };
         let default_electrum_port = match network_type {
             Network::Mainnet => 50001,
             Network::Testnet => 60001,
             Network::Regtest => 60401,
-            Network::Liquid => 51000,
-            Network::LiquidRegtest => 51401,
+            Network::Elements => 51000,
+            Network::ElementsRegtest => 51401,
         };
         let default_monitoring_port = match network_type {
             Network::Mainnet => 4224,
             Network::Testnet => 14224,
             Network::Regtest => 24224,
-            Network::Liquid => 34224,
-            Network::LiquidRegtest => 44224,
+            Network::Elements => 34224,
+            Network::ElementsRegtest => 44224,
 
         };
 
@@ -157,8 +157,8 @@ impl Config {
             Network::Mainnet => (),
             Network::Testnet => daemon_dir.push("testnet3"),
             Network::Regtest => daemon_dir.push("regtest"),
-            Network::Liquid => daemon_dir.push("liquid"),
-            Network::LiquidRegtest => daemon_dir.push("liquidregtest"),
+            Network::Elements => daemon_dir.push("elements"),
+            Network::ElementsRegtest => daemon_dir.push("elementsregtest"),
         }
         let cookie = m.value_of("cookie").map(|s| s.to_owned());
 

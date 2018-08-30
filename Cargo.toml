@@ -37,7 +37,6 @@ time = "0.1"
 tiny_http = "0.6"
 elements = { version="0.1.2", optional = true }
 
-
 [features]
 default = []
 elements-feature = ["elements"]

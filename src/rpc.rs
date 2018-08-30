@@ -4,7 +4,6 @@ use bitcoin::Transaction;
 #[cfg(feature = "elements")]
 use elements::Transaction;
 
-
 use bitcoin::network::serialize::{deserialize, serialize};
 use bitcoin::util::address::Address;
 use bitcoin::util::hash::Sha256dHash;
@@ -65,7 +64,6 @@ fn address_from_value(val: Option<&Value>) -> Result<Address> {
     Address::from_str(addr).chain_err(|| format!("invalid address {}", addr))
 }
 
-
 #[cfg(not(feature = "elements"))]
 fn jsonify_header(entry: &HeaderEntry) -> Value {
     let header = entry.header();
@@ -91,8 +89,6 @@ fn jsonify_header(entry: &HeaderEntry) -> Value {
         "timestamp": header.time,
     })
 }
-
-
 
 struct Connection {
     query: Arc<Query>,

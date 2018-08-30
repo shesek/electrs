@@ -4,7 +4,6 @@ use bitcoin::{Block, BlockHeader, Transaction, TxIn, TxOut};
 #[cfg(feature = "elements")]
 use elements::{Block, BlockHeader, Transaction, TxIn, TxOut};
 
-
 use bincode;
 use bitcoin::network::serialize::BitcoinHash;
 use bitcoin::network::serialize::{deserialize, serialize};
