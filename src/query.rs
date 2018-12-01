@@ -1,10 +1,10 @@
-use bitcoin::blockdata::block::Block;
 use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::util::hash::Sha256dHash;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use lru::LruCache;
+use bincode;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -154,6 +154,13 @@ fn txids_by_funding_output(
         .iter()
         .map(|row| TxInRow::from_row(row).txid_prefix)
         .collect()
+}
+
+pub fn get_block_txids(store: &ReadStore, blockhash: &Sha256dHash) -> Option<Vec<Sha256dHash>> {
+    let key = [b"X", &blockhash[..]].concat();
+    let value = store.get(&key)?;
+    let txids: Vec<Sha256dHash> = bincode::deserialize(&value).unwrap();
+    Some(txids)
 }
 
 pub struct TransactionCache {
@@ -391,8 +398,8 @@ impl Query {
             .index()
             .get_header(height)
             .chain_err(|| format!("missing block #{}", height))?;
-        let block: Block = self.app.daemon().getblock(&header_entry.hash())?;
-        let mut txids: Vec<Sha256dHash> = block.txdata.iter().map(|tx| tx.txid()).collect();
+        let mut txids = get_block_txids(self.app.read_store(), &header_entry.hash())
+            .chain_err(|| "cannot load block txids")?;
         let pos = txids
             .iter()
             .position(|txid| txid == tx_hash)
