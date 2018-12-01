@@ -263,7 +263,17 @@ impl Connection {
             Some(value) => value.as_bool().chain_err(|| "non-bool verbose value")?,
             None => false,
         };
-        Ok(self.query.get_transaction(&tx_hash, verbose)?)
+        if verbose {
+            // Forward verbose tx requests to bitcoind.
+            // This is not normally used by Electrum wallets.
+            warn!("verbose tx requested, forwarding to bitcoind");
+            Ok(self.query.get_verbose_transaction(&tx_hash)?)
+        } else {
+            // Use the more efficient internal db
+            Ok(json!(hex::encode(
+                self.query.get_raw_transaction(&tx_hash)?
+            )))
+        }
     }
 
     fn blockchain_transaction_get_merkle(&self, params: &[Value]) -> Result<Value> {

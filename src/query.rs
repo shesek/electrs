@@ -1,6 +1,6 @@
 use bitcoin::blockdata::block::Block;
 use bitcoin::blockdata::transaction::Transaction;
-use bitcoin::consensus::encode::deserialize;
+use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::util::hash::Sha256dHash;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
@@ -10,11 +10,11 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use app::App;
 use index::{compute_script_hash, TxInRow, TxOutRow, TxRow};
-use mempool::Tracker;
+use mempool::{Tracker, MEMPOOL_HEIGHT};
 use metrics::Metrics;
 use serde_json::Value;
 use store::{ReadStore, Row};
-use util::{FullHash, HashPrefix, HeaderEntry};
+use util::{Bytes, FullHash, HashPrefix, HeaderEntry};
 
 use errors::*;
 
@@ -203,12 +203,20 @@ impl Query {
         let mut txns = vec![];
         for txid_prefix in prefixes {
             for tx_row in txrows_by_prefix(store, &txid_prefix) {
-                let txid: Sha256dHash = deserialize(&tx_row.key.txid).unwrap();
-                let txn = self
-                    .tx_cache
-                    .get_or_else(&txid, || self.load_txn(&txid, tx_row.height))?;
+                if tx_row.height != MEMPOOL_HEIGHT {
+                    // ensure the current block at the confirmation height matches the block seen to contain the tx
+                    let header = self
+                        .app
+                        .index()
+                        .get_header(tx_row.height as usize)
+                        .chain_err(|| "cannot find block")?;
+                    if *header.hash() != tx_row.blockhash {
+                        // tx was re-orged, skip it
+                        continue;
+                    }
+                }
                 txns.push(TxnHeight {
-                    txn,
+                    txn: deserialize(&tx_row.rawtx).expect("cannot parse tx from store"),
                     height: tx_row.height,
                 })
             }
@@ -341,18 +349,23 @@ impl Query {
         Ok(blockhash)
     }
 
-    // Internal API for transaction retrieval
-    fn load_txn(&self, tx_hash: &Sha256dHash, block_height: u32) -> Result<Transaction> {
-        let blockhash = self.lookup_confirmed_blockhash(tx_hash, Some(block_height))?;
-        self.app.daemon().gettransaction(tx_hash, blockhash)
-    }
-
     // Public API for transaction retrieval (for Electrum RPC)
-    pub fn get_transaction(&self, tx_hash: &Sha256dHash, verbose: bool) -> Result<Value> {
+    // Queries the bitcoind node.
+    pub fn get_verbose_transaction(&self, tx_hash: &Sha256dHash) -> Result<Value> {
         let blockhash = self.lookup_confirmed_blockhash(tx_hash, /*block_height*/ None)?;
         self.app
             .daemon()
-            .gettransaction_raw(tx_hash, blockhash, verbose)
+            .gettransaction_raw(tx_hash, blockhash, true)
+    }
+
+    // Public API for raw transaction retrieval (for Electrum RPC)
+    // Queries our internal db and mempool tracker.
+    pub fn get_raw_transaction(&self, tx_hash: &Sha256dHash) -> Result<Bytes> {
+        Ok(txrow_by_txid(self.app.read_store(), &tx_hash)
+            .map(|row| row.rawtx)
+            .or_else(|| {
+                self.tracker.read().unwrap().get_txn(&tx_hash).map(|tx| serialize(&tx))
+            }).chain_err(|| format!("cannot find tx {}", tx_hash))?)
     }
 
     pub fn get_headers(&self, heights: &[usize]) -> Vec<HeaderEntry> {

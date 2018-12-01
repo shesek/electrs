@@ -117,16 +117,20 @@ pub struct TxKey {
 pub struct TxRow {
     pub key: TxKey,
     pub height: u32, // value
+    pub blockhash: Sha256dHash,
+    pub rawtx: Bytes,
 }
 
 impl TxRow {
-    pub fn new(txid: &Sha256dHash, height: u32) -> TxRow {
+    pub fn new(txn: &Transaction, height: u32, blockhash: &Sha256dHash) -> TxRow {
         TxRow {
             key: TxKey {
                 code: b'T',
-                txid: full_hash(&txid[..]),
+                txid: full_hash(&txn.txid()[..]),
             },
             height: height,
+            blockhash: blockhash.clone(),
+            rawtx: serialize(txn),
         }
     }
 
@@ -141,14 +145,18 @@ impl TxRow {
     pub fn to_row(&self) -> Row {
         Row {
             key: bincode::serialize(&self.key).unwrap(),
-            value: bincode::serialize(&self.height).unwrap(),
+            value: bincode::serialize(&(self.height, &self.blockhash, &self.rawtx)).unwrap(),
         }
     }
 
     pub fn from_row(row: &Row) -> TxRow {
+        let (height, blockhash, rawtx): (u32, Sha256dHash, Bytes) =
+            bincode::deserialize(&row.value).expect("failed to parse tx row");
         TxRow {
             key: bincode::deserialize(&row.key).expect("failed to parse TxKey"),
-            height: bincode::deserialize(&row.value).expect("failed to parse height"),
+            height,
+            blockhash,
+            rawtx,
         }
     }
 }
@@ -167,7 +175,12 @@ pub fn compute_script_hash(data: &[u8]) -> FullHash {
     hash
 }
 
-pub fn index_transaction(txn: &Transaction, height: usize, rows: &mut Vec<Row>) {
+pub fn index_transaction(
+    txn: &Transaction,
+    height: usize,
+    blockhash: &Sha256dHash,
+    rows: &mut Vec<Row>,
+) {
     let null_hash = Sha256dHash::default();
     let txid: Sha256dHash = txn.txid();
     for input in &txn.input {
@@ -179,14 +192,15 @@ pub fn index_transaction(txn: &Transaction, height: usize, rows: &mut Vec<Row>) 
     for output in &txn.output {
         rows.push(TxOutRow::new(&txid, &output).to_row());
     }
-    // Persist transaction ID and confirmed height
-    rows.push(TxRow::new(&txid, height as u32).to_row());
+    // Persist transaction ID, confirmed height/hash and raw serialization
+    rows.push(TxRow::new(txn, height as u32, blockhash).to_row());
 }
 
 pub fn index_block(block: &Block, height: usize) -> Vec<Row> {
+    let blockhash = block.bitcoin_hash();
     let mut rows = vec![];
     for txn in &block.txdata {
-        index_transaction(&txn, height, &mut rows);
+        index_transaction(&txn, height, &blockhash, &mut rows);
     }
     let blockhash = block.bitcoin_hash();
     // Persist block hash and header
