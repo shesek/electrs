@@ -193,11 +193,14 @@ impl Mempool {
         // Phase 1: add to txstore
         for tx in txs {
             let txid = tx.txid();
+            debug!("admitting {} to mempool: {:?}", txid, tx);
             txids.push(txid);
             self.txstore.insert(txid, tx);
         }
         // Phase 2: index history and spend edges (can fail if some txos cannot be found)
-        let txos = match self.lookup_txos(&self.get_prevouts(&txids)) {
+        let prevouts = self.get_prevouts(&txids);
+        debug!("mempool txs prevouts: {:?}", prevouts);
+        let txos = match self.lookup_txos(&prevouts) {
             Ok(txos) => txos,
             Err(err) => {
                 warn!("lookup txouts failed: {}", err);

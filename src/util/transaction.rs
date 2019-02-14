@@ -41,6 +41,7 @@ pub fn is_coinbase(txin: &TxIn) -> bool {
 }
 
 pub fn has_prevout(txin: &TxIn) -> bool {
+    debug!("checking has_prevout for {:?}", txin);
     #[cfg(not(feature = "liquid"))]
     return !txin.previous_output.is_null();
     #[cfg(feature = "liquid")]
