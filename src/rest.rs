@@ -259,6 +259,22 @@ struct TxOutValue {
 
     #[cfg(feature = "liquid")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    nonce: Option<String>,
+
+    #[cfg(feature = "liquid")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    noncecommitment: Option<String>,
+
+    #[cfg(feature = "liquid")]
+    #[serde(skip_serializing_if = "Vec::is_empty", with = "crate::util::serde_hex")]
+    surjection_proof: Vec<u8>,
+
+    #[cfg(feature = "liquid")]
+    #[serde(skip_serializing_if = "Vec::is_empty", with = "crate::util::serde_hex")]
+    range_proof: Vec<u8>,
+
+    #[cfg(feature = "liquid")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pegout: Option<PegoutValue>,
 }
 
@@ -283,6 +299,17 @@ impl TxOutValue {
         #[cfg(feature = "liquid")]
         let assetcommitment = match txout.asset {
             Asset::Confidential(..) => Some(hex::encode(encode::serialize(&txout.asset))),
+            _ => None,
+        };
+
+        #[cfg(feature = "liquid")]
+        let nonce = match txout.nonce {
+            Nonce::Explicit(value) => Some(value.to_hex()),
+            _ => None,
+        };
+        #[cfg(feature = "liquid")]
+        let noncecommitment = match txout.nonce {
+            Nonce::Confidential(..) => Some(hex::encode(encode::serialize(&txout.nonce))),
             _ => None,
         };
 
@@ -333,6 +360,14 @@ impl TxOutValue {
             asset,
             #[cfg(feature = "liquid")]
             assetcommitment,
+            #[cfg(feature = "liquid")]
+            nonce,
+            #[cfg(feature = "liquid")]
+            noncecommitment,
+            #[cfg(feature = "liquid")]
+            surjection_proof: txout.witness.surjection_proof.clone(),
+            #[cfg(feature = "liquid")]
+            range_proof: txout.witness.rangeproof.clone(),
             #[cfg(feature = "liquid")]
             pegout,
         }
