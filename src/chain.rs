@@ -29,6 +29,8 @@ pub enum Network {
     Testnet,
     #[cfg(not(feature = "liquid"))]
     Regtest,
+    #[cfg(not(feature = "liquid"))]
+    Signet,
 
     #[cfg(feature = "liquid")]
     Liquid,
@@ -45,6 +47,8 @@ impl Network {
             Network::Testnet => 0x0709_110B,
             #[cfg(not(feature = "liquid"))]
             Network::Regtest => 0xDAB5_BFFA,
+            #[cfg(not(feature = "liquid"))]
+            Network::Signet => 0x0A03_CF40,
 
             #[cfg(feature = "liquid")]
             Network::Liquid => 0xDAB5_BFFA,
@@ -87,6 +91,7 @@ impl Network {
             "mainnet".to_string(),
             "testnet".to_string(),
             "regtest".to_string(),
+            "signet".to_string(),
         ];
 
         #[cfg(feature = "liquid")]
@@ -110,10 +115,17 @@ pub fn bitcoin_genesis_hash(network: BNetwork) -> bitcoin::BlockHash {
         static ref REGTEST_GENESIS: bitcoin::BlockHash =
             genesis_block(BNetwork::Regtest).block_hash();
     }
+    #[cfg(not(feature = "liquid"))]
+    lazy_static! {
+        static ref SIGNET_GENESIS: bitcoin::BlockHash =
+            genesis_block(BNetwork::Signet).block_hash();
+    }
     match network {
         BNetwork::Bitcoin => *BITCOIN_GENESIS,
         BNetwork::Testnet => *TESTNET_GENESIS,
         BNetwork::Regtest => *REGTEST_GENESIS,
+        #[cfg(not(feature = "liquid"))]
+        BNetwork::Signet => *SIGNET_GENESIS,
     }
 }
 
@@ -144,6 +156,8 @@ impl From<&str> for Network {
             "testnet" => Network::Testnet,
             #[cfg(not(feature = "liquid"))]
             "regtest" => Network::Regtest,
+            #[cfg(not(feature = "liquid"))]
+            "signet" => Network::Signet,
 
             #[cfg(feature = "liquid")]
             "liquid" => Network::Liquid,
@@ -162,6 +176,7 @@ impl From<Network> for BNetwork {
             Network::Bitcoin => BNetwork::Bitcoin,
             Network::Testnet => BNetwork::Testnet,
             Network::Regtest => BNetwork::Regtest,
+            Network::Signet => BNetwork::Signet,
         }
     }
 }
@@ -173,6 +188,7 @@ impl From<BNetwork> for Network {
             BNetwork::Bitcoin => Network::Bitcoin,
             BNetwork::Testnet => Network::Testnet,
             BNetwork::Regtest => Network::Regtest,
+            BNetwork::Signet => Network::Signet,
         }
     }
 }
