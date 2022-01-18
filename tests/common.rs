@@ -207,7 +207,6 @@ pub fn init_electrum_tester() -> Result<(ElectrumRPC, net::SocketAddr, TestRunne
 }
 
 fn init_node(client: &bitcoincore_rpc::Client) -> bitcoincore_rpc::Result<()> {
-    client.create_wallet("testrunner", None, None, None, None)?;
     let addr = client.get_new_address(None, None)?;
     client.generate_to_address(101, &addr)?;
     Ok(())
