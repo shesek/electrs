@@ -222,6 +222,7 @@ fn init_log() -> StdErrLog {
 }
 
 fn rand_available_addr() -> net::SocketAddr {
+    // note this has a potential but unlikely race condition, if the port is grabbed before the caller binds it
     let socket = net::UdpSocket::bind("127.0.0.1:0").unwrap();
     socket.local_addr().unwrap()
 }
