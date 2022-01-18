@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Once, RwLock};
 use std::{env, net};
 
 use stderrlog::StdErrLog;
@@ -214,11 +214,11 @@ fn init_node(client: &bitcoincore_rpc::Client) -> bitcoincore_rpc::Result<()> {
 }
 
 fn init_log() -> StdErrLog {
-    // TODO once
+    static ONCE: Once = Once::new();
     let mut log = stderrlog::new();
     log.verbosity(4);
     // log.timestamp(stderrlog::Timestamp::Millisecond        );
-    log.init().expect("logging initialization failed");
+    ONCE.call_once(|| log.init().expect("logging initialization failed"));
     log
 }
 
