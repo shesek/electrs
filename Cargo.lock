@@ -195,7 +195,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b8d99d58466295cb2bf72c6959b784d59f8f0d6977458d2ba3eb75c834f36c3"
 dependencies = [
  "bitcoincore-rpc-json",
- "jsonrpc 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "jsonrpc 0.12.1",
  "log",
  "serde",
  "serde_json",
@@ -217,6 +217,22 @@ name = "bitcoind"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65ddc41af9556a341c909bc71de33e16da52bf5f8dbda6b7a402054c60bdb722"
+dependencies = [
+ "bitcoin_hashes 0.10.0",
+ "bitcoincore-rpc",
+ "flate2",
+ "home",
+ "log",
+ "tar",
+ "tempfile",
+ "ureq 1.5.5",
+]
+
+[[package]]
+name = "bitcoind"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64945525eb7efb48af5fba5f1d878346af641522320971e35abee4b65ded9efb"
 dependencies = [
  "bitcoin_hashes 0.10.0",
  "bitcoincore-rpc",
@@ -458,13 +474,14 @@ dependencies = [
  "base64 0.13.0",
  "bincode",
  "bitcoin 0.28.0",
- "bitcoind",
+ "bitcoind 0.20.0",
  "clap",
  "crossbeam-channel",
  "dirs",
  "electrum-client",
  "electrumd",
  "elements",
+ "elementsd",
  "error-chain",
  "glob",
  "hex",
@@ -514,13 +531,13 @@ dependencies = [
 [[package]]
 name = "electrumd"
 version = "0.1.0"
-source = "git+https://github.com/shesek/electrumd?rev=ea32146dc1db378d4444cd713a27a8ea3919c4c0#ea32146dc1db378d4444cd713a27a8ea3919c4c0"
+source = "git+https://github.com/shesek/electrumd?rev=c2c9a781021ffe97d5f9d687edb01b5ce5388244#c2c9a781021ffe97d5f9d687edb01b5ce5388244"
 dependencies = [
  "bitcoin_hashes 0.10.0",
  "home",
- "jsonrpc 0.12.0 (git+https://github.com/shesek/rust-jsonrpc?branch=202201-nonarray)",
+ "jsonrpc 0.12.0",
  "log",
- "rand 0.8.4",
+ "rand 0.8.5",
  "tempfile",
  "ureq 1.5.5",
 ]
@@ -537,6 +554,18 @@ dependencies = [
  "serde",
  "serde_json",
  "slip21",
+]
+
+[[package]]
+name = "elementsd"
+version = "0.3.0"
+source = "git+https://github.com/shesek/elementsd?rev=86d9c3d480f72963c81671705ac84af89d4d1b4b#86d9c3d480f72963c81671705ac84af89d4d1b4b"
+dependencies = [
+ "bitcoin_hashes 0.10.0",
+ "bitcoind 0.23.0",
+ "flate2",
+ "tar",
+ "ureq 1.5.5",
 ]
 
 [[package]]
@@ -849,9 +878,8 @@ dependencies = [
 
 [[package]]
 name = "jsonrpc"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f8423b78fc94d12ef1a4a9d13c348c9a78766dda0cc18817adf0faf77e670c8"
+version = "0.12.0"
+source = "git+https://github.com/shesek/rust-jsonrpc?branch=202201-nonarray#aaa0af349bd4885a59f6f6ba1753e78279014f98"
 dependencies = [
  "base64-compat",
  "serde",
@@ -861,8 +889,9 @@ dependencies = [
 
 [[package]]
 name = "jsonrpc"
-version = "0.12.0"
-source = "git+https://github.com/shesek/rust-jsonrpc?branch=202201-nonarray#aaa0af349bd4885a59f6f6ba1753e78279014f98"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f8423b78fc94d12ef1a4a9d13c348c9a78766dda0cc18817adf0faf77e670c8"
 dependencies = [
  "base64-compat",
  "serde",
@@ -1150,6 +1179,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
+name = "ppv-lite86"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb9f9e6e233e5c4a35559a617bf40a4ec447db2e84c20b55a6f83167b7e57872"
+
+[[package]]
 name = "proc-macro-hack"
 version = "0.5.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1244,7 +1279,7 @@ checksum = "6d71dacdc3c88c1fde3885a3be3fbab9f35724e6ce99467f7d9c5026132184ca"
 dependencies = [
  "autocfg 0.1.8",
  "libc",
- "rand_chacha",
+ "rand_chacha 0.1.1",
  "rand_core 0.4.2",
  "rand_hc",
  "rand_isaac",
@@ -1256,6 +1291,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand"
+version = "0.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+dependencies = [
+ "libc",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.3",
+]
+
+[[package]]
 name = "rand_chacha"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1263,6 +1309,16 @@ checksum = "556d3a1ca6600bfcbab7c7c91ccb085ac7fbbcd70e008a98742e7847f4f7bcef"
 dependencies = [
  "autocfg 0.1.8",
  "rand_core 0.3.1",
+]
+
+[[package]]
+name = "rand_chacha"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.6.3",
 ]
 
 [[package]]
@@ -1279,6 +1335,15 @@ name = "rand_core"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c33a3c44ca05fa6f1807d8e6743f3824e8509beca625669633be0acbdf509dc"
+
+[[package]]
+name = "rand_core"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d34f1408f55294453790c48b2f1ebbb1c5b4b7563eb1f418bcfcfdbb06ebb4e7"
+dependencies = [
+ "getrandom",
+]
 
 [[package]]
 name = "rand_hc"
