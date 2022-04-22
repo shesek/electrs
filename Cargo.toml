@@ -76,6 +76,11 @@ codegen-units = 1
 git = "https://github.com/Blockstream/rust-electrum-client"
 rev = "d3792352992a539afffbe11501d1aff9fd5b919d" # add-peer branch
 
+# needed for https://github.com/rust-bitcoin/rust-bitcoincore-rpc/pull/218
+[patch.crates-io.bitcoincore-rpc]
+git = "https://github.com/shesek/rust-bitcoincore-rpc"
+rev = "c680bc9d1ad58c57c3751b9d190f54c7508a31c1"
+
 # not yet published on crates.io
 [patch.crates-io.electrumd]
 git = "https://github.com/shesek/electrumd"

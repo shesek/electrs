@@ -191,8 +191,7 @@ dependencies = [
 [[package]]
 name = "bitcoincore-rpc"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b8d99d58466295cb2bf72c6959b784d59f8f0d6977458d2ba3eb75c834f36c3"
+source = "git+https://github.com/shesek/rust-bitcoincore-rpc?rev=c680bc9d1ad58c57c3751b9d190f54c7508a31c1#c680bc9d1ad58c57c3751b9d190f54c7508a31c1"
 dependencies = [
  "bitcoincore-rpc-json",
  "jsonrpc 0.12.1",
@@ -204,10 +203,9 @@ dependencies = [
 [[package]]
 name = "bitcoincore-rpc-json"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce91de73c61f5776cf938bfa88378c5b404a70e3369b761dacbe6024fea79dd"
+source = "git+https://github.com/shesek/rust-bitcoincore-rpc?rev=c680bc9d1ad58c57c3751b9d190f54c7508a31c1#c680bc9d1ad58c57c3751b9d190f54c7508a31c1"
 dependencies = [
- "bitcoin 0.27.1",
+ "bitcoin 0.28.0",
  "serde",
  "serde_json",
 ]
@@ -531,7 +529,7 @@ dependencies = [
 [[package]]
 name = "electrumd"
 version = "0.1.0"
-source = "git+https://github.com/shesek/electrumd?rev=c2c9a781021ffe97d5f9d687edb01b5ce5388244#c2c9a781021ffe97d5f9d687edb01b5ce5388244"
+source = "git+https://github.com/shesek/electrumd?rev=6eac0b7b1f2447472016e2c1473a6284f7f8648e#6eac0b7b1f2447472016e2c1473a6284f7f8648e"
 dependencies = [
  "bitcoin_hashes 0.10.0",
  "home",
@@ -558,8 +556,9 @@ dependencies = [
 
 [[package]]
 name = "elementsd"
-version = "0.3.0"
-source = "git+https://github.com/shesek/elementsd?rev=86d9c3d480f72963c81671705ac84af89d4d1b4b#86d9c3d480f72963c81671705ac84af89d4d1b4b"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7bb42410e6897948479d56c11acd44187f0f4db8abd4b7d5217d2f60b27475b"
 dependencies = [
  "bitcoin_hashes 0.10.0",
  "bitcoind 0.23.0",
