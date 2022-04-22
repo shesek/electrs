@@ -55,7 +55,7 @@ pub fn init_tester() -> Result<TestRunner> {
 
     generate(node_client, 101).chain_err(|| "failed initializing blocks")?;
 
-    // Needed to claim the initialfreecoins are our own
+    // Needed to claim the initialfreecoins as our own
     // See https://github.com/ElementsProject/elements/issues/956
     #[cfg(feature = "liquid")]
     node_client.call::<Value>("rescanblockchain", &[])?;

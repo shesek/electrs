@@ -62,7 +62,7 @@ electrum-client = { version = "0.8", optional = true }
 
 [dev-dependencies]
 bitcoind = { version = "0.20.0", features = [ "22_0" ] }
-elementsd = { version = "0.3.0", features = [ "0_21_0" ] }
+elementsd = { version = "0.4.0", features = [ "0_21_0" ] }
 electrumd = { version = "0.1.0", features = [ "4_1_5" ] }
 ureq = { version = "2.4", default-features = false, features = [ "json" ] }
 tempfile = "3.0"
@@ -80,8 +80,3 @@ rev = "d3792352992a539afffbe11501d1aff9fd5b919d" # add-peer branch
 [patch.crates-io.electrumd]
 git = "https://github.com/shesek/electrumd"
 rev = "c2c9a781021ffe97d5f9d687edb01b5ce5388244"
-
-# pending https://github.com/RCasatta/elementsd/pull/1
-[patch.crates-io.elementsd]
-git = "https://github.com/shesek/elementsd"
-rev = "86d9c3d480f72963c81671705ac84af89d4d1b4b"
