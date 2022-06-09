@@ -204,7 +204,7 @@ fn test_rest() -> Result<()> {
             let assetid = issuance["asset"].as_str().expect("asset id");
             let issuance_txid = issuance["txid"].as_str().expect("issuance txid");
 
-            // Test GET /tx/:txid for issuance tx
+            // Test GET /asset/:assetid
             let asset = get_json(&format!("/asset/{}", assetid))?;
             let stats = &asset["chain_stats"];
             assert_eq!(asset["asset_id"].as_str(), Some(assetid));
@@ -215,7 +215,7 @@ fn test_rest() -> Result<()> {
             assert_eq!(stats["has_blinded_issuances"].as_bool(), Some(true));
             assert_eq!(stats["issued_amount"].as_u64(), Some(0));
 
-            // Test GET /asset/:assetid
+            // Test GET /tx/:txid for issuance tx
             let issuance_tx = get_json(&format!("/tx/{}", issuance_txid))?;
             let issuance_in_index = asset["issuance_txin"]["vin"].as_u64().unwrap();
             let issuance_in = &issuance_tx["vin"][issuance_in_index as usize];
@@ -236,13 +236,13 @@ fn test_rest() -> Result<()> {
             let assetid = issuance["asset"].as_str().expect("asset id");
             let issuance_txid = issuance["txid"].as_str().expect("issuance txid");
 
-            // Test GET /tx/:txid for issuance tx
+            // Test GET /asset/:assetid
             let asset = get_json(&format!("/asset/{}", assetid))?;
             let stats = &asset["chain_stats"];
             assert_eq!(stats["has_blinded_issuances"].as_bool(), Some(false));
             assert_eq!(stats["issued_amount"].as_u64(), Some(150000000));
 
-            // Test GET /asset/:assetid
+            // Test GET /tx/:txid for issuance tx
             let issuance_tx = get_json(&format!("/tx/{}", issuance_txid))?;
             let issuance_in_index = asset["issuance_txin"]["vin"].as_u64().unwrap();
             let issuance_in = &issuance_tx["vin"][issuance_in_index as usize];
