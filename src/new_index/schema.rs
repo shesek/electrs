@@ -257,7 +257,11 @@ impl Indexer {
         Ok(result)
     }
 
-    pub fn update(&mut self, daemon: &Daemon) -> Result<BlockHash> {
+    pub fn update(
+        &mut self,
+        daemon: &Daemon,
+        collect_txids: bool,
+    ) -> Result<(BlockHash, HashSet<Txid>)> {
         let daemon = daemon.reconnect()?;
         let tip = daemon.getbestblockhash()?;
         let new_headers = self.get_new_headers(&daemon, &tip)?;
@@ -268,7 +272,12 @@ impl Indexer {
             to_add.len(),
             self.from
         );
-        start_fetcher(self.from, &daemon, to_add)?.map(|blocks| self.add(&blocks));
+        let added_txids = start_fetcher(self.from, &daemon, to_add)?
+            .map(|blocks| self.add(&blocks, collect_txids))
+            .into_iter()
+            .flatten()
+            .collect::<HashSet<_>>(); // empty when collect_txids == false
+
         self.start_auto_compactions(&self.store.txstore_db);
 
         let to_index = self.headers_to_index(&new_headers);
@@ -301,14 +310,14 @@ impl Indexer {
 
         self.tip_metric.set(headers.len() as i64 - 1);
 
-        Ok(tip)
+        Ok((tip, added_txids))
     }
 
-    fn add(&self, blocks: &[BlockEntry]) {
+    fn add(&self, blocks: &[BlockEntry], collect_txids: bool) -> Vec<Txid> {
         // TODO: skip orphaned blocks?
-        let rows = {
+        let (rows, added_txids) = {
             let _timer = self.start_timer("add_process");
-            add_blocks(blocks, &self.iconfig)
+            add_blocks(blocks, &self.iconfig, collect_txids)
         };
         {
             let _timer = self.start_timer("add_write");
@@ -320,6 +329,8 @@ impl Indexer {
             .write()
             .unwrap()
             .extend(blocks.iter().map(|b| b.entry.hash()));
+
+        added_txids // empty when collect_txids == false
     }
 
     fn index(&self, blocks: &[BlockEntry]) {
@@ -957,7 +968,11 @@ fn load_blockheaders(db: &DB) -> HashMap<BlockHash, BlockHeader> {
         .collect()
 }
 
-fn add_blocks(block_entries: &[BlockEntry], iconfig: &IndexerConfig) -> Vec<DBRow> {
+fn add_blocks(
+    block_entries: &[BlockEntry],
+    iconfig: &IndexerConfig,
+    collect_txids: bool,
+) -> (Vec<DBRow>, Vec<Txid>) {
     // persist individual transactions:
     //      T{txid} → {rawtx}
     //      C{txid}{blockhash}{height} →
@@ -971,22 +986,31 @@ fn add_blocks(block_entries: &[BlockEntry], iconfig: &IndexerConfig) -> Vec<DBRo
         .map(|b| {
             let mut rows = vec![];
             let blockhash = full_hash(&b.entry.hash()[..]);
-            let txids: Vec<Txid> = b.block.txdata.iter().map(|tx| tx.txid()).collect();
+            let mut block_txids = vec![];
+
             for tx in &b.block.txdata {
                 add_transaction(tx, blockhash, &mut rows, iconfig);
+                block_txids.push(tx.txid());
             }
 
             if !iconfig.light_mode {
-                rows.push(BlockRow::new_txids(blockhash, &txids).into_row());
+                rows.push(BlockRow::new_txids(blockhash, &block_txids).into_row());
                 rows.push(BlockRow::new_meta(blockhash, &BlockMeta::from(b)).into_row());
             }
 
             rows.push(BlockRow::new_header(&b).into_row());
             rows.push(BlockRow::new_done(blockhash).into_row()); // mark block as "added"
-            rows
+            (rows, if collect_txids { block_txids } else { vec![] })
         })
-        .flatten()
-        .collect()
+        .reduce(
+            || (vec![], vec![]),
+            |curr, next| {
+                (
+                    curr.0.into_iter().chain(next.0.into_iter()).collect(), // merge rows
+                    curr.1.into_iter().chain(next.1.into_iter()).collect(), // merge txids
+                )
+            },
+        )
 }
 
 fn add_transaction(

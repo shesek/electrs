@@ -53,14 +53,17 @@ impl<T> Fetcher<T> {
         Fetcher { receiver, thread }
     }
 
-    pub fn map<F>(self, mut func: F)
+    pub fn map<F, R>(self, mut func: F) -> Vec<R>
     where
-        F: FnMut(T) -> (),
+        F: FnMut(T) -> R,
     {
+        let mut results = vec![];
         for item in self.receiver {
-            func(item);
+            results.push(func(item));
         }
-        self.thread.join().expect("fetcher thread panicked")
+
+        self.thread.join().expect("fetcher thread panicked");
+        results
     }
 }
 
