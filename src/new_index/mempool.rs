@@ -288,7 +288,7 @@ impl Mempool {
         let added_txids: Vec<&Txid> = new_txids.difference(&old_txids).collect();
 
         // Remove missing transactions (evicted from mempool)
-        self.remove(removed_txids);
+        self.remove(removed_txids, false);
 
         // Download and add new transactions from bitcoind's mempool
         let to_add = match daemon.gettransactions(&added_txids) {
@@ -474,17 +474,19 @@ impl Mempool {
             .collect()
     }
 
-    fn remove(&mut self, to_remove: HashSet<&Txid>) {
+    fn remove(&mut self, to_remove: HashSet<&Txid>, tolerate_missing: bool) {
         self.delta
             .with_label_values(&["remove"])
             .observe(to_remove.len() as f64);
         let _timer = self.latency.with_label_values(&["remove"]).start_timer();
 
         for txid in &to_remove {
-            self.txstore
-                .remove(*txid)
-                .unwrap_or_else(|| panic!("missing mempool tx {}", txid));
-
+            if self.txstore.remove(*txid).is_none() {
+                if !tolerate_missing {
+                    panic!("missing mempool tx {}", txid)
+                }
+                continue;
+            }
             self.feeinfo.remove(*txid).or_else(|| {
                 warn!("missing mempool tx feeinfo {}", txid);
                 None
