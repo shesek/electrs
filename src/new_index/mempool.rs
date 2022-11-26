@@ -276,27 +276,32 @@ impl Mempool {
         &self.backlog_stats.0
     }
 
-    pub fn update(&mut self, daemon: &Daemon) -> Result<()> {
+    pub fn update(&mut self, daemon: &Daemon) -> Result<Option<u64>> {
         let _timer = self.latency.with_label_values(&["update"]).start_timer();
-        let new_txids = daemon
+        let mempool = daemon
             .getmempooltxids()
             .chain_err(|| "failed to update mempool from daemon")?;
+        let new_txids = mempool.txids;
+
         let old_txids = HashSet::from_iter(self.txstore.keys().cloned());
-        let to_remove: HashSet<&Txid> = old_txids.difference(&new_txids).collect();
+        let removed_txids: HashSet<&Txid> = old_txids.difference(&new_txids).collect();
+        let added_txids: Vec<&Txid> = new_txids.difference(&old_txids).collect();
+
+        // Remove missing transactions (evicted from mempool)
+        self.remove(removed_txids);
 
         // Download and add new transactions from bitcoind's mempool
-        let txids: Vec<&Txid> = new_txids.difference(&old_txids).collect();
-        let to_add = match daemon.gettransactions(&txids) {
+        let to_add = match daemon.gettransactions(&added_txids) {
             Ok(txs) => txs,
             Err(err) => {
-                warn!("failed to get {} transactions: {}", txids.len(), err); // e.g. new block or RBF
-                return Ok(()); // keep the mempool until next update()
+                // This may happen due to a race-condition, if mempool transactions are evicted between fetching the
+                // mempool txids and fetching the mempool transactions themselves (e.g. due to a new block or RBF)
+                warn!("failed to get {} transactions: {}", added_txids.len(), err);
+                return Ok(None); // skip adding transactions until the next update()
             }
         };
         // Add new transactions
         self.add(to_add);
-        // Remove missing transactions
-        self.remove(to_remove);
 
         self.count
             .with_label_values(&["txs"])
@@ -311,7 +316,7 @@ impl Mempool {
             self.backlog_stats = (BacklogStats::new(&self.feeinfo), Instant::now());
         }
 
-        Ok(())
+        Ok(Some(mempool.mempool_sequence))
     }
 
     pub fn add_by_txid(&mut self, daemon: &Daemon, txid: &Txid) {

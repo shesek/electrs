@@ -515,8 +515,12 @@ impl Daemon {
         tx_from_value(value)
     }
 
-    pub fn getmempooltxids(&self) -> Result<HashSet<Txid>> {
-        let res = self.request("getrawmempool", json!([/*verbose=*/ false]))?;
+    pub fn getmempooltxids(&self) -> Result<MempoolResult> {
+        let res = self.request(
+            "getrawmempool",
+            json!([/*verbose=*/ false, /*mempool_sequence=*/ true]),
+        )?;
+
         Ok(serde_json::from_value(res).chain_err(|| "invalid getrawmempool reply")?)
     }
 
@@ -632,4 +636,10 @@ impl Daemon {
         // from BTC/kB to sat/b
         Ok(relayfee * 100_000f64)
     }
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct MempoolResult {
+    pub txids: HashSet<Txid>,
+    pub mempool_sequence: u64,
 }
