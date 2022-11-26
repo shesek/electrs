@@ -260,10 +260,11 @@ impl Indexer {
     pub fn update(
         &mut self,
         daemon: &Daemon,
+        tip: Option<BlockHash>, // may optionally be provided if already known
         collect_txids: bool,
     ) -> Result<(BlockHash, HashSet<Txid>)> {
         let daemon = daemon.reconnect()?;
-        let tip = daemon.getbestblockhash()?;
+        let tip = tip.map_or_else(|| daemon.getbestblockhash(), Ok)?;
         let new_headers = self.get_new_headers(&daemon, &tip)?;
 
         let to_add = self.headers_to_add(&new_headers);

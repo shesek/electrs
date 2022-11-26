@@ -44,7 +44,7 @@ fn main() {
     let chain = ChainQuery::new(Arc::clone(&store), Arc::clone(&daemon), &config, &metrics);
 
     let mut indexer = Indexer::open(Arc::clone(&store), FetchFrom::Bitcoind, &config, &metrics);
-    indexer.update(&daemon, false).unwrap();
+    indexer.update(&daemon, None, false).unwrap();
 
     let mut iter = store.txstore_db().raw_iterator();
     iter.seek(b"T");
