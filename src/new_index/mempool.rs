@@ -476,11 +476,13 @@ impl Mempool {
             .collect()
     }
 
-    pub fn remove(&mut self, to_remove: HashSet<Txid>, tolerate_missing: bool) {
+    pub fn remove(&mut self, to_remove: HashSet<Txid>, tolerate_missing: bool) -> usize {
         self.delta
             .with_label_values(&["remove"])
             .observe(to_remove.len() as f64);
         let _timer = self.latency.with_label_values(&["remove"]).start_timer();
+
+        let mut num_removed = 0;
 
         for txid in &to_remove {
             if self.txstore.remove(txid).is_none() {
@@ -489,6 +491,8 @@ impl Mempool {
                 }
                 continue;
             }
+
+            num_removed += 1;
             self.feeinfo.remove(txid).or_else(|| {
                 warn!("missing mempool tx feeinfo {}", txid);
                 None
@@ -510,6 +514,8 @@ impl Mempool {
 
         self.edges
             .retain(|_outpoint, (txid, _vin)| !to_remove.contains(txid));
+
+        num_removed
     }
 
     #[cfg(feature = "liquid")]

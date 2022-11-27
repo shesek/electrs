@@ -166,7 +166,19 @@ impl ZmqSyncer {
         let (_, confirmed_txids) = self.indexer.update(&self.daemon, Some(new_tip), true)?;
 
         // Drop confirmed transactions from our mempool view
-        self.mempool.write().unwrap().remove(confirmed_txids, true);
+        let num_removed = self.mempool.write().unwrap().remove(confirmed_txids, true);
+
+        // Transactions removed from the mempool due to block inclusion count towards the mempool
+        // sequence number, but don't trigger ZMQ notifications with the new sequence numbers.
+        // This adjusts the expected sequence number to account for this.
+        // See https://github.com/bitcoin/bitcoin/blob/9c47eb450346937b/test/functional/interface_zmq.py#L347-L349
+        self.expected_sequence += num_removed as u64;
+
+        trace!(
+            "indexed new block, {} txs removed from mempool, sequence at {}",
+            num_removed,
+            self.expected_sequence
+        );
 
         Ok(())
     }
