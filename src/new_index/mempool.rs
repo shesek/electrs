@@ -284,7 +284,7 @@ impl Mempool {
         let new_txids = mempool.txids;
 
         let old_txids = HashSet::from_iter(self.txstore.keys().cloned());
-        let removed_txids: HashSet<&Txid> = old_txids.difference(&new_txids).collect();
+        let removed_txids: HashSet<Txid> = old_txids.difference(&new_txids).copied().collect();
         let added_txids: Vec<&Txid> = new_txids.difference(&old_txids).collect();
 
         // Remove missing transactions (evicted from mempool)
@@ -321,8 +321,10 @@ impl Mempool {
 
     pub fn add_by_txid(&mut self, daemon: &Daemon, txid: &Txid) {
         if self.txstore.get(txid).is_none() {
-            if let Ok(tx) = daemon.getmempooltx(&txid) {
-                self.add(vec![tx])
+            match daemon.getmempooltx(&txid) {
+                Ok(tx) => self.add(vec![tx]),
+                // May get evicted from the mempool before we manage to grab it. Log it as a warning without triggering an error.
+                Err(e) => warn!("failed fetching mempool tx {} for add_by_txid: {}", txid, e),
             }
         }
     }
@@ -474,20 +476,20 @@ impl Mempool {
             .collect()
     }
 
-    fn remove(&mut self, to_remove: HashSet<&Txid>, tolerate_missing: bool) {
+    pub fn remove(&mut self, to_remove: HashSet<Txid>, tolerate_missing: bool) {
         self.delta
             .with_label_values(&["remove"])
             .observe(to_remove.len() as f64);
         let _timer = self.latency.with_label_values(&["remove"]).start_timer();
 
         for txid in &to_remove {
-            if self.txstore.remove(*txid).is_none() {
+            if self.txstore.remove(txid).is_none() {
                 if !tolerate_missing {
                     panic!("missing mempool tx {}", txid)
                 }
                 continue;
             }
-            self.feeinfo.remove(*txid).or_else(|| {
+            self.feeinfo.remove(txid).or_else(|| {
                 warn!("missing mempool tx feeinfo {}", txid);
                 None
             });

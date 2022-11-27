@@ -12,7 +12,7 @@ readme = "README.md"
 edition = "2018"
 
 [features]
-default = [ "rocksdb" ]
+default = [ "rocksdb", "zmq" ]
 liquid = [ "elements" ]
 electrum-discovery = [ "electrum-client"]
 oldcpu = [ "rocksdb-oldcpu" ]
@@ -55,6 +55,8 @@ hyper = "0.14"
 hyperlocal = "0.8"
 # close to same tokio version as dependent by hyper v0.14 and hyperlocal 0.8 -- things can go awry if they mismatch
 tokio = { version = "1", features = ["sync", "macros"] }
+
+zmq = { version = "0.10", optional = true }
 
 # optional dependencies for electrum-discovery
 electrum-client = { version = "0.8", optional = true }

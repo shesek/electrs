@@ -40,6 +40,9 @@ pub struct Config {
     pub electrum_txs_limit: usize,
     pub electrum_banner: String,
 
+    // Always None when the 'zmq' feature is disabled
+    pub zmq_addr: Option<String>,
+
     #[cfg(feature = "liquid")]
     pub parent_network: BNetwork,
     #[cfg(feature = "liquid")]
@@ -182,6 +185,14 @@ impl Config {
                     .help("Welcome banner for the Electrum server, shown in the console to clients.")
                     .takes_value(true)
             );
+
+        #[cfg(feature = "zmq")]
+        let args = args.arg(
+            Arg::with_name("zmq_addr")
+                .long("zmq-addr")
+                .help("Bitcoin Core ZMQ socket address (enables ZMQ-based sync)")
+                .takes_value(true),
+        );
 
         #[cfg(unix)]
         let args = args.arg(
@@ -369,6 +380,9 @@ impl Config {
             |s| s.into(),
         );
 
+        #[cfg(feature = "zmq")]
+        let zmq_addr = m.value_of("zmq_addr").map(str::to_string);
+
         #[cfg(feature = "electrum-discovery")]
         let electrum_public_hosts = m
             .value_of("electrum_public_hosts")
@@ -403,6 +417,11 @@ impl Config {
             index_unspendables: m.is_present("index_unspendables"),
             cors: m.value_of("cors").map(|s| s.to_string()),
             precache_scripts: m.value_of("precache_scripts").map(|s| s.to_string()),
+
+            #[cfg(feature = "zmq")]
+            zmq_addr,
+            #[cfg(not(feature = "zmq"))]
+            zmq_addr: None,
 
             #[cfg(feature = "liquid")]
             parent_network,

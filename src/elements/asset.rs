@@ -215,7 +215,7 @@ pub fn index_mempool_tx_assets(
 
 // Remove mempool transaction issuances from in-memory store
 pub fn remove_mempool_tx_assets(
-    to_remove: &HashSet<&Txid>,
+    to_remove: &HashSet<Txid>,
     asset_history: &mut HashMap<AssetId, Vec<TxHistoryInfo>>,
     asset_issuance: &mut HashMap<AssetId, AssetRow>,
 ) {

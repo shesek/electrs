@@ -20,6 +20,9 @@ use electrs::{
     signal::Waiter,
 };
 
+#[cfg(feature = "zmq")]
+use electrs::new_index::ZmqSyncer;
+
 #[cfg(feature = "liquid")]
 use electrs::elements::AssetRegistry;
 
@@ -102,27 +105,39 @@ fn run_server(config: Arc<Config>) -> Result<()> {
     let rest_server = rest::start(Arc::clone(&config), Arc::clone(&query));
     let electrum_server = ElectrumRPC::start(Arc::clone(&config), Arc::clone(&query), &metrics);
 
-    loop {
-        if let Err(err) = signal.wait(Duration::from_secs(5), true) {
-            info!("stopping server: {}", err);
-            rest_server.stop();
-            // the electrum server is stopped when dropped
-            break;
-        }
-
-        // Index new blocks
-        let current_tip = daemon.getbestblockhash()?;
-        if current_tip != tip {
-            indexer.update(&daemon, Some(current_tip), false)?;
-            tip = current_tip;
-        };
-
-        // Update mempool
-        mempool.write().unwrap().update(&daemon)?;
-
-        // Update subscribed clients
-        electrum_server.notify();
+    // Hand control over to the ZMQ-based syncer when enabled
+    if let Some(zmq_addr) = &config.zmq_addr {
+        #[cfg(feature = "zmq")]
+        ZmqSyncer::new(daemon, indexer, mempool).start(zmq_addr)?;
+        // config.zmq_addr is guaranteed to be None when the zmq feature is disabled, so the
+        // feature must be available if we reached this point.
     }
+
+    // Otherwise, start a poll-based syncer that runs on an interval
+    else {
+        loop {
+            if let Err(err) = signal.wait(Duration::from_secs(5), true) {
+                info!("stopping server: {}", err);
+                rest_server.stop();
+                // the electrum server is stopped when dropped
+                break;
+            }
+
+            // Index new blocks
+            let current_tip = daemon.getbestblockhash()?;
+            if current_tip != tip {
+                indexer.update(&daemon, Some(current_tip), false)?;
+                tip = current_tip;
+            };
+
+            // Update mempool
+            mempool.write().unwrap().update(&daemon)?;
+
+            // Update subscribed clients
+            electrum_server.notify();
+        }
+    }
+
     info!("server stopped");
     Ok(())
 }

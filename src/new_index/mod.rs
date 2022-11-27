@@ -5,6 +5,9 @@ pub mod precache;
 mod query;
 pub mod schema;
 
+#[cfg(feature = "zmq")]
+mod zmq;
+
 pub use self::db::{DBRow, DB};
 pub use self::fetch::{BlockEntry, FetchFrom};
 pub use self::mempool::Mempool;
@@ -13,3 +16,6 @@ pub use self::schema::{
     compute_script_hash, parse_hash, ChainQuery, FundingInfo, Indexer, ScriptStats, SpendingInfo,
     SpendingInput, Store, TxHistoryInfo, TxHistoryKey, TxHistoryRow, Utxo,
 };
+
+#[cfg(feature = "zmq")]
+pub use self::zmq::ZmqSyncer;
