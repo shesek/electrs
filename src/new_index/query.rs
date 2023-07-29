@@ -9,7 +9,7 @@ use crate::config::Config;
 use crate::daemon::Daemon;
 use crate::errors::*;
 use crate::new_index::{ChainQuery, Mempool, ScriptStats, SpendingInput, Utxo};
-use crate::util::{is_spendable, BlockId, Bytes, TransactionStatus};
+use crate::util::{is_spendable, BlockId, Bytes, TransactionStatus, GuardOpt};
 
 #[cfg(feature = "liquid")]
 use crate::{
@@ -253,7 +253,7 @@ impl Query {
         let results = results
             .into_iter()
             .map(|(asset_id, metadata)| {
-                Ok(lookup_asset(&self, None, asset_id, Some(metadata))?
+                Ok(lookup_asset(&self, GuardOpt::None, asset_id, Some(metadata))?
                     .chain_err(|| "missing registered asset")?)
             })
             .collect::<Result<Vec<_>>>()?;

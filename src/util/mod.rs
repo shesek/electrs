@@ -15,7 +15,7 @@ pub use self::transaction::{
 
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
-use std::thread;
+use std::{sync, thread};
 
 use crate::chain::BlockHeader;
 use bitcoin::hashes::sha256d::Hash as Sha256dHash;
@@ -93,6 +93,32 @@ where
         .spawn(f)
         .unwrap()
 }
+
+/// A trait to represent either an RwLock or an already-acquired read lock guard.
+/// This makes it easier to reuse the lock in recursive calls and to avoid deadlocks.
+/// See https://github.com/Blockstream/electrs/pull/57
+pub trait ReusableReadLock<'a, T> {
+    /// Get an RwLockReadGuard, either by acquiring a new lock or reusing a previous one
+    /// The return value implements ReusableReadLock itself too.
+    fn read(self) -> sync::LockResult<sync::RwLockReadGuard<'a, T>>;
+}
+
+impl<'a, T> ReusableReadLock<'a, T> for &'a sync::Arc<sync::RwLock<T>> {
+    // Acquire a new read lock on the RwLock
+    fn read(self) -> sync::LockResult<sync::RwLockReadGuard<'a, T>> {
+        sync::RwLock::read(self)
+    }
+}
+
+impl<'a, T> ReusableReadLock<'a, T> for sync::RwLockReadGuard<'a, T> {
+    // Reuse the existing read lock
+    fn read(self) -> sync::LockResult<sync::RwLockReadGuard<'a, T>> {
+        Ok(self)
+    }
+}
+
+/// Utility for specifying a typed None for functions that accept an Option<ReusableReadLock>
+pub type GuardOpt<T> = Option<sync::RwLockReadGuard<'static, T>>;
 
 // Similar to https://doc.rust-lang.org/std/primitive.bool.html#method.then (nightly only),
 // but with a function that returns an `Option<T>` instead of `T`. Adding something like

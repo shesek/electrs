@@ -13,7 +13,7 @@ use crate::elements::registry::{AssetMeta, AssetRegistry};
 use crate::errors::*;
 use crate::new_index::schema::{TxHistoryInfo, TxHistoryKey, TxHistoryRow};
 use crate::new_index::{db::DBFlush, ChainQuery, DBRow, Mempool, Query};
-use crate::util::{full_hash, Bytes, FullHash, TransactionStatus, TxInput};
+use crate::util::{full_hash, Bytes, FullHash, ReusableReadLock, TransactionStatus, TxInput};
 
 lazy_static! {
     pub static ref NATIVE_ASSET_ID: AssetId =
@@ -346,9 +346,9 @@ fn asset_history_row(
     TxHistoryRow { key }
 }
 
-pub fn lookup_asset(
+pub fn lookup_asset<'a>(
     query: &Query,
-    registry: Option<&Arc<RwLock<AssetRegistry>>>,
+    registry: Option<impl ReusableReadLock<'a, AssetRegistry>>,
     asset_id: &AssetId,
     meta: Option<&AssetMeta>, // may optionally be provided if already known
 ) -> Result<Option<LiquidAsset>> {
