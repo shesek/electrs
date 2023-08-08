@@ -74,6 +74,8 @@ impl Store {
             HeaderList::empty()
         };
 
+        trace!("HeaderList ready. {} headers, tip {}", headers.len(), headers.tip());
+
         Store {
             txstore_db,
             history_db,
@@ -258,8 +260,12 @@ impl Indexer {
     }
 
     pub fn update(&mut self, daemon: &Daemon) -> Result<BlockHash> {
+        trace!("reconnecting to rpc daemon");
         let daemon = daemon.reconnect()?;
+        trace!("getting tip");
         let tip = daemon.getbestblockhash()?;
+        trace!("tip: {}", tip);
+
         let new_headers = self.get_new_headers(&daemon, &tip)?;
 
         let to_add = self.headers_to_add(&new_headers);
