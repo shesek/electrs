@@ -18,7 +18,7 @@ use bitcoin::consensus::encode::serialize_hex;
 use elements::encode::serialize_hex;
 
 use crate::chain::Txid;
-use crate::config::Config;
+use crate::config::{Config, RpcLogging};
 use crate::electrum::{get_electrum_height, ProtocolVersion};
 use crate::errors::*;
 use crate::metrics::{Gauge, HistogramOpts, HistogramVec, MetricOpts, Metrics};
@@ -101,6 +101,7 @@ struct Connection {
     txs_limit: usize,
     #[cfg(feature = "electrum-discovery")]
     discovery: Option<Arc<DiscoveryManager>>,
+    rpc_logging: Option<RpcLogging>,
 }
 
 impl Connection {
@@ -111,6 +112,7 @@ impl Connection {
         stats: Arc<Stats>,
         txs_limit: usize,
         #[cfg(feature = "electrum-discovery")] discovery: Option<Arc<DiscoveryManager>>,
+        rpc_logging: Option<RpcLogging>,
     ) -> Connection {
         Connection {
             query,
@@ -123,6 +125,7 @@ impl Connection {
             txs_limit,
             #[cfg(feature = "electrum-discovery")]
             discovery,
+            rpc_logging,
         }
     }
 
@@ -490,6 +493,27 @@ impl Connection {
         Ok(result)
     }
 
+    fn log_rpc_event(&self, entries: &Vec<(&str, Value)>) {
+        if let Some(_) = self.rpc_logging {
+            let mut log = json!({});
+
+            if let Some(log_map) = log.as_object_mut() {
+                entries.into_iter().for_each(|e| {
+                    log_map.insert(e.0.to_string(), e.1.clone());
+                });
+                log_map.insert(
+                    "source".to_string(),
+                    json!({
+                        "ip": self.addr.ip().to_string(),
+                        "port": self.addr.port(),
+                    }),
+                );
+            }
+
+            info!("{}", log);
+        }
+    }
+
     fn send_values(&mut self, values: &[Value]) -> Result<()> {
         for value in values {
             let line = value.to_string() + "\n";
@@ -507,6 +531,7 @@ impl Connection {
             trace!("RPC {:?}", msg);
             match msg {
                 Message::Request(line) => {
+                    let method_info: String;
                     let cmd: Value = from_str(&line).chain_err(|| "invalid JSON format")?;
                     let reply = match (
                         cmd.get("method"),
@@ -517,9 +542,30 @@ impl Connection {
                             Some(&Value::String(ref method)),
                             &Value::Array(ref params),
                             Some(ref id),
-                        ) => self.handle_command(method, params, id)?,
+                        ) => {
+                            let mut log_entries =
+                                vec![("event", json!("rpc request")), ("method", json!(method))];
+
+                            if let Some(RpcLogging::Full) = self.rpc_logging {
+                                log_entries.push(("params", json!(params)));
+                            }
+
+                            self.log_rpc_event(&log_entries);
+                            method_info = method.clone();
+
+                            self.handle_command(method, params, id)?
+                        }
                         _ => bail!("invalid command: {}", cmd),
                     };
+
+                    let line = reply.to_string() + "\n";
+
+                    self.log_rpc_event(&vec![
+                        ("event", json!("rpc response")),
+                        ("payload_size", json!(line.as_bytes().len())),
+                        ("method", json!(method_info)),
+                    ]);
+
                     self.send_values(&[reply])?
                 }
                 Message::PeriodicUpdate => {
@@ -563,6 +609,9 @@ impl Connection {
 
     pub fn run(mut self) {
         self.stats.clients.inc();
+
+        self.log_rpc_event(&vec![("event", json!("connection established"))]);
+
         let reader = BufReader::new(self.stream.try_clone().expect("failed to clone TcpStream"));
         let tx = self.chan.sender();
         let child = spawn_thread("reader", || Connection::handle_requests(reader, tx));
@@ -579,6 +628,9 @@ impl Connection {
             .sub(self.status_hashes.len() as i64);
 
         debug!("[{}] shutting down connection", self.addr);
+
+        self.log_rpc_event(&vec![("event", json!("connection closed"))]);
+
         let _ = self.stream.shutdown(Shutdown::Both);
         if let Err(err) = child.join().expect("receiver panicked") {
             error!("[{}] receiver failed: {}", self.addr, err);
@@ -741,6 +793,7 @@ impl RPC {
                     let garbage_sender = garbage_sender.clone();
                     #[cfg(feature = "electrum-discovery")]
                     let discovery = discovery.clone();
+                    let rpc_logging = config.rpc_logging.clone();
 
                     let spawned = spawn_thread("peer", move || {
                         info!("[{}] connected peer", addr);
@@ -752,6 +805,7 @@ impl RPC {
                             txs_limit,
                             #[cfg(feature = "electrum-discovery")]
                             discovery,
+                            rpc_logging,
                         );
                         senders.lock().unwrap().push(conn.chan.sender());
                         conn.run();
