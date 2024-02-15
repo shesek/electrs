@@ -64,7 +64,7 @@ pub fn optional_value_for_newer_blocks(
 #[derive(Serialize, Deserialize)]
 pub struct TxInput {
     pub txid: Txid,
-    pub vin: u16,
+    pub vin: u32,
 }
 
 pub fn is_coinbase(txin: &TxIn) -> bool {

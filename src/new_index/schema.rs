@@ -1089,7 +1089,7 @@ impl ChainQuery {
                     outpoint,
                     SpendingInput {
                         txid: deserialize(&edge.spending_txid).expect("failed to parse Txid"),
-                        vin: edge.spending_vin as u32,
+                        vin: edge.spending_vin,
                         confirmed: Some(header.into()),
                     },
                 ))
@@ -1327,7 +1327,7 @@ fn index_transaction(
                 confirmed_height,
                 TxHistoryInfo::Funding(FundingInfo {
                     txid,
-                    vout: txo_index as u16,
+                    vout: txo_index as u32,
                     value: txo.value.amount_value(),
                 }),
             );
@@ -1347,9 +1347,9 @@ fn index_transaction(
             confirmed_height,
             TxHistoryInfo::Spending(SpendingInfo {
                 txid,
-                vin: txi_index as u16,
+                vin: txi_index as u32,
                 prev_txid: full_hash(&txi.previous_output.txid[..]),
-                prev_vout: txi.previous_output.vout as u16,
+                prev_vout: txi.previous_output.vout,
                 value: prev_txo.value.amount_value(),
             }),
         );
@@ -1357,9 +1357,9 @@ fn index_transaction(
 
         let edge = TxEdgeRow::new(
             full_hash(&txi.previous_output.txid[..]),
-            txi.previous_output.vout as u16,
+            txi.previous_output.vout,
             txid,
-            txi_index as u16,
+            txi_index as u32,
             confirmed_height,
         );
         rows.push(edge.into_row());
@@ -1478,7 +1478,7 @@ impl TxConfRow {
 struct TxOutKey {
     code: u8,
     txid: FullHash,
-    vout: u16,
+    vout: u32,
 }
 
 struct TxOutRow {
@@ -1492,7 +1492,7 @@ impl TxOutRow {
             key: TxOutKey {
                 code: b'O',
                 txid: *txid,
-                vout: vout as u16,
+                vout: vout as u32,
             },
             value: serialize(txout),
         }
@@ -1501,7 +1501,7 @@ impl TxOutRow {
         bincode::serialize_little(&TxOutKey {
             code: b'O',
             txid: full_hash(&outpoint.txid[..]),
-            vout: outpoint.vout as u16,
+            vout: outpoint.vout,
         })
         .unwrap()
     }
@@ -1591,16 +1591,16 @@ impl BlockRow {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FundingInfo {
     pub txid: FullHash,
-    pub vout: u16,
+    pub vout: u32,
     pub value: Value,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SpendingInfo {
     pub txid: FullHash, // spending transaction
-    pub vin: u16,
+    pub vin: u32,
     pub prev_txid: FullHash, // funding transaction
-    pub prev_vout: u16,
+    pub prev_vout: u32,
     pub value: Value,
 }
 
@@ -1697,11 +1697,11 @@ impl TxHistoryInfo {
         match self {
             TxHistoryInfo::Funding(ref info) => OutPoint {
                 txid: deserialize(&info.txid).unwrap(),
-                vout: info.vout as u32,
+                vout: info.vout,
             },
             TxHistoryInfo::Spending(ref info) => OutPoint {
                 txid: deserialize(&info.prev_txid).unwrap(),
-                vout: info.prev_vout as u32,
+                vout: info.prev_vout,
             },
             #[cfg(feature = "liquid")]
             TxHistoryInfo::Issuing(_)
@@ -1716,13 +1716,13 @@ impl TxHistoryInfo {
 pub struct TxEdgeKey {
     code: u8,
     funding_txid: FullHash,
-    funding_vout: u16,
+    funding_vout: u32,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct TxEdgeValue {
     spending_txid: FullHash,
-    spending_vin: u16,
+    spending_vin: u32,
     spending_height: u32,
 }
 
@@ -1734,9 +1734,9 @@ pub struct TxEdgeRow {
 impl TxEdgeRow {
     pub fn new(
         funding_txid: FullHash,
-        funding_vout: u16,
+        funding_vout: u32,
         spending_txid: FullHash,
-        spending_vin: u16,
+        spending_vin: u32,
         spending_height: u32,
     ) -> Self {
         let key = TxEdgeKey {
@@ -1753,7 +1753,7 @@ impl TxEdgeRow {
     }
 
     fn key(outpoint: &OutPoint) -> Bytes {
-        bincode::serialize_little(&(b'S', full_hash(&outpoint.txid[..]), outpoint.vout as u16))
+        bincode::serialize_little(&(b'S', full_hash(&outpoint.txid[..]), outpoint.vout))
             .unwrap()
     }
 

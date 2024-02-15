@@ -52,7 +52,7 @@ impl PegoutValue {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PeginInfo {
     pub txid: FullHash,
-    pub vin: u16,
+    pub vin: u32,
     pub value: u64,
 }
 
@@ -60,6 +60,6 @@ pub struct PeginInfo {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PegoutInfo {
     pub txid: FullHash,
-    pub vout: u16,
+    pub vout: u32,
     pub value: u64,
 }

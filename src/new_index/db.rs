@@ -11,7 +11,7 @@ use crate::config::Config;
 use crate::new_index::db_metrics::RocksDbMetrics;
 use crate::util::{bincode, spawn_thread, Bytes};
 
-static DB_VERSION: u32 = 2;
+static DB_VERSION: u32 = 3;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct DBRow {
