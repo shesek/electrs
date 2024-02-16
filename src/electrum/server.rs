@@ -90,6 +90,14 @@ fn get_status_hash(txs: Vec<(Txid, Option<BlockId>)>, query: &Query) -> Option<F
     }
 }
 
+macro_rules! conditionally_log_rpc_event {
+    ($self:ident, $event:expr) => {
+        if $self.rpc_logging.is_some() {
+            $self.log_rpc_event(&$event);
+        }
+    };
+}
+
 struct Connection {
     query: Arc<Query>,
     last_header_entry: Option<HeaderEntry>,
@@ -543,14 +551,18 @@ impl Connection {
                             &Value::Array(ref params),
                             Some(ref id),
                         ) => {
-                            let mut log_entries =
-                                vec![("event", json!("rpc request")), ("method", json!(method))];
-
-                            if let Some(RpcLogging::Full) = self.rpc_logging {
-                                log_entries.push(("params", json!(params)));
-                            }
-
-                            self.log_rpc_event(&log_entries);
+                            conditionally_log_rpc_event!(
+                                self,
+                                if let Some(RpcLogging::Full) = self.rpc_logging {
+                                    vec![
+                                        ("event", json!("rpc request")),
+                                        ("method", json!(method)),
+                                        ("params", json!(params)),
+                                    ]
+                                } else {
+                                    vec![("event", json!("rpc request")), ("method", json!(method))]
+                                }
+                            );
                             method_info = method.clone();
 
                             self.handle_command(method, params, id)?
@@ -560,11 +572,14 @@ impl Connection {
 
                     let line = reply.to_string() + "\n";
 
-                    self.log_rpc_event(&vec![
-                        ("event", json!("rpc response")),
-                        ("payload_size", json!(line.as_bytes().len())),
-                        ("method", json!(method_info)),
-                    ]);
+                    conditionally_log_rpc_event!(
+                        self,
+                        vec![
+                            ("event", json!("rpc response")),
+                            ("payload_size", json!(line.as_bytes().len())),
+                            ("method", json!(method_info)),
+                        ]
+                    );
 
                     self.send_values(&[reply])?
                 }
@@ -609,8 +624,7 @@ impl Connection {
 
     pub fn run(mut self) {
         self.stats.clients.inc();
-
-        self.log_rpc_event(&vec![("event", json!("connection established"))]);
+        conditionally_log_rpc_event!(self, vec![("event", json!("connection established"))]);
 
         let reader = BufReader::new(self.stream.try_clone().expect("failed to clone TcpStream"));
         let tx = self.chan.sender();
@@ -628,8 +642,7 @@ impl Connection {
             .sub(self.status_hashes.len() as i64);
 
         debug!("[{}] shutting down connection", self.addr);
-
-        self.log_rpc_event(&vec![("event", json!("connection closed"))]);
+        conditionally_log_rpc_event!(self, vec![("event", json!("connection closed"))]);
 
         let _ = self.stream.shutdown(Shutdown::Both);
         if let Err(err) = child.join().expect("receiver panicked") {
@@ -793,7 +806,7 @@ impl RPC {
                     let garbage_sender = garbage_sender.clone();
                     #[cfg(feature = "electrum-discovery")]
                     let discovery = discovery.clone();
-                    let rpc_logging = config.rpc_logging.clone();
+                    let rpc_logging = config.electrum_rpc_logging.clone();
 
                     let spawned = spawn_thread("peer", move || {
                         info!("[{}] connected peer", addr);

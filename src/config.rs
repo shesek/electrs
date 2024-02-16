@@ -39,7 +39,7 @@ pub struct Config {
     pub utxos_limit: usize,
     pub electrum_txs_limit: usize,
     pub electrum_banner: String,
-    pub rpc_logging: Option<RpcLogging>,
+    pub electrum_rpc_logging: Option<RpcLogging>,
 
     #[cfg(feature = "liquid")]
     pub parent_network: BNetwork,
@@ -187,8 +187,8 @@ impl Config {
                     .help("Welcome banner for the Electrum server, shown in the console to clients.")
                     .takes_value(true)
             ).arg(
-                Arg::with_name("rpc_logging")
-                    .long("rpc-logging")
+                Arg::with_name("electrum_rpc_logging")
+                    .long("electrum-rpc-logging")
                     .help(&rpc_logging_help)
                     .takes_value(true),
             );
@@ -391,8 +391,8 @@ impl Config {
             electrum_rpc_addr,
             electrum_txs_limit: value_t_or_exit!(m, "electrum_txs_limit", usize),
             electrum_banner,
-            rpc_logging: m
-                .value_of("rpc_logging")
+            electrum_rpc_logging: m
+                .value_of("electrum_rpc_logging")
                 .map(|option| RpcLogging::from(option)),
             http_addr,
             http_socket_file,
