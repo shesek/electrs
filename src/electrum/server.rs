@@ -501,8 +501,8 @@ impl Connection {
         Ok(result)
     }
 
-    fn log_rpc_event(&self, mut log: HashMap<&str, Value>) {
-        log.insert(
+    fn log_rpc_event(&self, mut log: Value) {
+        log.as_object_mut().unwrap().insert(
             "source".into(),
             json!({
                 "ip": self.addr.ip().to_string(),
@@ -541,15 +541,21 @@ impl Connection {
                             &Value::Array(ref params),
                             Some(ref id),
                         ) => {
-                            conditionally_log_rpc_event!(self, {
-                                let mut log: HashMap<&str, Value> = HashMap::new();
-                                log.insert("event", json!("rpc request"));
-                                log.insert("method", json!(method));
+                            conditionally_log_rpc_event!(
+                                self,
                                 if let Some(RpcLogging::Full) = self.rpc_logging {
-                                    log.insert("params", json!(params));
+                                    json!({
+                                        "event": "rpc request",
+                                        "method": method,
+                                        "params": params
+                                    })
+                                } else {
+                                    json!({
+                                        "event": "rpc request",
+                                        "method": method
+                                    })
                                 }
-                                log
-                            });
+                            );
                             method_info = method.clone();
 
                             self.handle_command(method, params, id)?
@@ -559,13 +565,14 @@ impl Connection {
 
                     let line = reply.to_string() + "\n";
 
-                    conditionally_log_rpc_event!(self, {
-                        let mut log: HashMap<&str, Value> = HashMap::new();
-                        log.insert("event", json!("rpc response"));
-                        log.insert("method", json!(method_info));
-                        log.insert("payload_size", json!(line.as_bytes().len()));
-                        log
-                    });
+                    conditionally_log_rpc_event!(
+                        self,
+                        json!({
+                            "event": "rpc response",
+                            "method": method_info,
+                            "payload_size": line.as_bytes().len()
+                        })
+                    );
 
                     self.send_values(&[reply])?
                 }
@@ -610,11 +617,12 @@ impl Connection {
 
     pub fn run(mut self) {
         self.stats.clients.inc();
-        conditionally_log_rpc_event!(self, {
-            let mut log: HashMap<&str, Value> = HashMap::new();
-            log.insert("event", json!("connection established"));
-            log
-        });
+        conditionally_log_rpc_event!(
+            self,
+            json!({
+                "event": "connection established"
+            })
+        );
 
         let reader = BufReader::new(self.stream.try_clone().expect("failed to clone TcpStream"));
         let tx = self.chan.sender();
@@ -632,11 +640,12 @@ impl Connection {
             .sub(self.status_hashes.len() as i64);
 
         debug!("[{}] shutting down connection", self.addr);
-        conditionally_log_rpc_event!(self, {
-            let mut log: HashMap<&str, Value> = HashMap::new();
-            log.insert("event", json!("connection closed"));
-            log
-        });
+        conditionally_log_rpc_event!(
+            self,
+            json!({
+                "event": "connection closed"
+            })
+        );
 
         let _ = self.stream.shutdown(Shutdown::Both);
         if let Err(err) = child.join().expect("receiver panicked") {
