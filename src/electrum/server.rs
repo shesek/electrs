@@ -93,7 +93,7 @@ fn get_status_hash(txs: Vec<(Txid, Option<BlockId>)>, query: &Query) -> Option<F
 macro_rules! conditionally_log_rpc_event {
     ($self:ident, $event:expr) => {
         if $self.rpc_logging.is_some() {
-            $self.log_rpc_event(&$event);
+            $self.log_rpc_event($event);
         }
     };
 }
@@ -501,23 +501,15 @@ impl Connection {
         Ok(result)
     }
 
-    fn log_rpc_event(&self, entries: &Vec<(&str, Value)>) {
-        let mut log = json!({});
-
-        if let Some(log_map) = log.as_object_mut() {
-            entries.into_iter().for_each(|e| {
-                log_map.insert(e.0.to_string(), e.1.clone());
-            });
-            log_map.insert(
-                "source".to_string(),
-                json!({
-                    "ip": self.addr.ip().to_string(),
-                    "port": self.addr.port(),
-                }),
-            );
-        }
-
-        info!("{}", log);
+    fn log_rpc_event(&self, mut log: HashMap<&str, Value>) {
+        log.insert(
+            "source".into(),
+            json!({
+                "ip": self.addr.ip().to_string(),
+                "port": self.addr.port(),
+            }),
+        );
+        println!("ELECTRUM-RPC-LOGGER: {}", json!(log));
     }
 
     fn send_values(&mut self, values: &[Value]) -> Result<()> {
@@ -549,18 +541,15 @@ impl Connection {
                             &Value::Array(ref params),
                             Some(ref id),
                         ) => {
-                            conditionally_log_rpc_event!(
-                                self,
+                            conditionally_log_rpc_event!(self, {
+                                let mut log: HashMap<&str, Value> = HashMap::new();
+                                log.insert("event", json!("rpc request"));
+                                log.insert("method", json!(method));
                                 if let Some(RpcLogging::Full) = self.rpc_logging {
-                                    vec![
-                                        ("event", json!("rpc request")),
-                                        ("method", json!(method)),
-                                        ("params", json!(params)),
-                                    ]
-                                } else {
-                                    vec![("event", json!("rpc request")), ("method", json!(method))]
+                                    log.insert("params", json!(params));
                                 }
-                            );
+                                log
+                            });
                             method_info = method.clone();
 
                             self.handle_command(method, params, id)?
@@ -570,14 +559,13 @@ impl Connection {
 
                     let line = reply.to_string() + "\n";
 
-                    conditionally_log_rpc_event!(
-                        self,
-                        vec![
-                            ("event", json!("rpc response")),
-                            ("payload_size", json!(line.as_bytes().len())),
-                            ("method", json!(method_info)),
-                        ]
-                    );
+                    conditionally_log_rpc_event!(self, {
+                        let mut log: HashMap<&str, Value> = HashMap::new();
+                        log.insert("event", json!("rpc response"));
+                        log.insert("method", json!(method_info));
+                        log.insert("payload_size", json!(line.as_bytes().len()));
+                        log
+                    });
 
                     self.send_values(&[reply])?
                 }
@@ -622,7 +610,11 @@ impl Connection {
 
     pub fn run(mut self) {
         self.stats.clients.inc();
-        conditionally_log_rpc_event!(self, vec![("event", json!("connection established"))]);
+        conditionally_log_rpc_event!(self, {
+            let mut log: HashMap<&str, Value> = HashMap::new();
+            log.insert("event", json!("connection established"));
+            log
+        });
 
         let reader = BufReader::new(self.stream.try_clone().expect("failed to clone TcpStream"));
         let tx = self.chan.sender();
@@ -640,7 +632,11 @@ impl Connection {
             .sub(self.status_hashes.len() as i64);
 
         debug!("[{}] shutting down connection", self.addr);
-        conditionally_log_rpc_event!(self, vec![("event", json!("connection closed"))]);
+        conditionally_log_rpc_event!(self, {
+            let mut log: HashMap<&str, Value> = HashMap::new();
+            log.insert("event", json!("connection closed"));
+            log
+        });
 
         let _ = self.stream.shutdown(Shutdown::Both);
         if let Err(err) = child.join().expect("receiver panicked") {
