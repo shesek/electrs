@@ -542,20 +542,16 @@ impl Connection {
                         ) => {
                             conditionally_log_rpc_event!(
                                 self,
-                                if let Some(RpcLogging::Full) = self.rpc_logging {
-                                    json!({
-                                        "event": "rpc request",
-                                        "method": method,
-                                        "params": params,
-                                        "id": id
-                                    })
-                                } else {
-                                    json!({
-                                        "event": "rpc request",
-                                        "method": method,
-                                        "id": id
-                                    })
-                                }
+                                json!({
+                                    "event": "rpc request",
+                                    "id": id,
+                                    "method": method,
+                                    "params": if let Some(RpcLogging::Full) = self.rpc_logging {
+                                        json!(params)
+                                    } else {
+                                        Value::Null
+                                    }
+                                })
                             );
 
                             let reply = self.handle_command(method, params, id)?;
@@ -618,12 +614,7 @@ impl Connection {
 
     pub fn run(mut self) {
         self.stats.clients.inc();
-        conditionally_log_rpc_event!(
-            self,
-            json!({
-                "event": "connection established"
-            })
-        );
+        conditionally_log_rpc_event!(self, json!({ "event": "connection established" }));
 
         let reader = BufReader::new(self.stream.try_clone().expect("failed to clone TcpStream"));
         let tx = self.chan.sender();
@@ -641,12 +632,7 @@ impl Connection {
             .sub(self.status_hashes.len() as i64);
 
         debug!("[{}] shutting down connection", self.addr);
-        conditionally_log_rpc_event!(
-            self,
-            json!({
-                "event": "connection closed"
-            })
-        );
+        conditionally_log_rpc_event!(self, json!({ "event": "connection closed" }));
 
         let _ = self.stream.shutdown(Shutdown::Both);
         if let Err(err) = child.join().expect("receiver panicked") {
