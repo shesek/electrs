@@ -547,12 +547,14 @@ impl Connection {
                                     json!({
                                         "event": "rpc request",
                                         "method": method,
-                                        "params": params
+                                        "params": params,
+                                        "id": id
                                     })
                                 } else {
                                     json!({
                                         "event": "rpc request",
-                                        "method": method
+                                        "method": method,
+                                        "id": id
                                     })
                                 }
                             );
@@ -570,7 +572,8 @@ impl Connection {
                         json!({
                             "event": "rpc response",
                             "method": method_info,
-                            "payload_size": line.as_bytes().len()
+                            "payload_size": line.as_bytes().len(),
+                            "id": cmd.get("id").unwrap()
                         })
                     );
 
