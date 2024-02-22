@@ -529,9 +529,8 @@ impl Connection {
             trace!("RPC {:?}", msg);
             match msg {
                 Message::Request(line) => {
-                    let method_info: String;
                     let cmd: Value = from_str(&line).chain_err(|| "invalid JSON format")?;
-                    let reply = match (
+                    match (
                         cmd.get("method"),
                         cmd.get("params").unwrap_or_else(|| &empty_params),
                         cmd.get("id"),
@@ -558,26 +557,25 @@ impl Connection {
                                     })
                                 }
                             );
-                            method_info = method.clone();
 
-                            self.handle_command(method, params, id)?
+                            let reply = self.handle_command(method, params, id)?;
+
+                            conditionally_log_rpc_event!(
+                                self,
+                                json!({
+                                    "event": "rpc response",
+                                    "method": method,
+                                    "payload_size": reply.to_string().as_bytes().len(),
+                                    "id": id,
+                                })
+                            );
+
+                            self.send_values(&[reply])?
                         }
-                        _ => bail!("invalid command: {}", cmd),
-                    };
-
-                    let line = reply.to_string() + "\n";
-
-                    conditionally_log_rpc_event!(
-                        self,
-                        json!({
-                            "event": "rpc response",
-                            "method": method_info,
-                            "payload_size": line.as_bytes().len(),
-                            "id": cmd.get("id").unwrap()
-                        })
-                    );
-
-                    self.send_values(&[reply])?
+                        _ => {
+                            bail!("invalid command: {}", cmd)
+                        }
+                    }
                 }
                 Message::PeriodicUpdate => {
                     let values = self
