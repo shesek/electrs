@@ -4,6 +4,7 @@ use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::mpsc::{Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Instant;
 
 use bitcoin::hashes::sha256d::Hash as Sha256dHash;
 use crypto::digest::Digest;
@@ -554,6 +555,7 @@ impl Connection {
                                 })
                             );
 
+                            let start_time = Instant::now();
                             let reply = self.handle_command(method, params, id)?;
 
                             conditionally_log_rpc_event!(
@@ -562,6 +564,7 @@ impl Connection {
                                     "event": "rpc response",
                                     "method": method,
                                     "payload_size": reply.to_string().as_bytes().len(),
+                                    "duration_ms": start_time.elapsed().as_millis(),
                                     "id": id,
                                 })
                             );
