@@ -260,6 +260,7 @@ impl Counter {
 
 pub struct Daemon {
     daemon_dir: PathBuf,
+    daemon_parallelism: usize,
     blocks_dir: PathBuf,
     network: Network,
     conn: Mutex<Connection>,
@@ -276,6 +277,7 @@ impl Daemon {
         daemon_dir: &PathBuf,
         blocks_dir: &PathBuf,
         daemon_rpc_addr: SocketAddr,
+        daemon_parallelism: usize,
         cookie_getter: Arc<dyn CookieGetter>,
         network: Network,
         signal: Waiter,
@@ -283,6 +285,7 @@ impl Daemon {
     ) -> Result<Daemon> {
         let daemon = Daemon {
             daemon_dir: daemon_dir.clone(),
+            daemon_parallelism,
             blocks_dir: blocks_dir.clone(),
             network,
             conn: Mutex::new(Connection::new(
@@ -335,6 +338,7 @@ impl Daemon {
     pub fn reconnect(&self) -> Result<Daemon> {
         Ok(Daemon {
             daemon_dir: self.daemon_dir.clone(),
+            daemon_parallelism: self.daemon_parallelism,
             blocks_dir: self.blocks_dir.clone(),
             network: self.network,
             conn: Mutex::new(self.conn.lock().unwrap().reconnect()?),
@@ -406,10 +410,17 @@ impl Daemon {
     fn requests(&self, method: &str, params_list: &[Value]) -> Result<Vec<Value>> {
         // Send in parallel as individual JSONRPC requests, with no batching.
         // See https://github.com/Blockstream/electrs/pull/33
-        params_list
-            .par_iter()
-            .map(|params| self.retry_request(method, params))
-            .collect()
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(self.daemon_parallelism)
+            .thread_name(|i| format!("rpc-requests-{}", i))
+            .build()
+            .unwrap();
+        pool.install(|| {
+            params_list
+                .par_iter()
+                .map(|params| self.retry_request(method, params))
+                .collect()
+        })
     }
 
     // bitcoind JSONRPC API:
