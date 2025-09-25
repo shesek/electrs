@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, RwLock};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
 use bitcoin::hashes::sha256d::Hash as Sha256dHash;
@@ -772,10 +772,10 @@ impl RPC {
         });
     }
 
-    fn start_acceptor(addr: SocketAddr) -> Channel<Option<(TcpStream, SocketAddr)>> {
+    fn start_acceptor(addr: SocketAddr) -> (Channel<Option<(TcpStream, SocketAddr)>>, JoinHandle<()>) {
         let chan = Channel::unbounded();
         let acceptor = chan.sender();
-        spawn_thread("acceptor", move || {
+        let thread = spawn_thread("acceptor", move || {
             let socket = create_socket(&addr);
             socket.listen(511).expect("setting backlog failed");
             socket
@@ -795,7 +795,7 @@ impl RPC {
                 }
             }
         });
-        chan
+        (chan, thread)
     }
 
     pub fn start(
@@ -852,7 +852,7 @@ impl RPC {
             server: Some(spawn_thread("rpc", move || {
                 let senders = Arc::new(Mutex::new(Vec::<SyncSender<Message>>::new()));
 
-                let acceptor = RPC::start_acceptor(rpc_addr);
+                let (acceptor, acceptor_thread) = RPC::start_acceptor(rpc_addr);
                 RPC::start_notifier(notification, senders.clone(), acceptor.sender());
 
                 let mut threads = HashMap::new();
@@ -902,6 +902,11 @@ impl RPC {
                         }
                     }
                 }
+
+                trace!("closing acceptor thread");
+                // drop the acceptor channel receiver to terminate the acceptor thread
+                acceptor.into_receiver();
+                acceptor_thread.join().unwrap();
 
                 trace!("closing {} RPC connections", senders.lock().unwrap().len());
                 for sender in senders.lock().unwrap().iter() {
