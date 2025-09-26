@@ -639,7 +639,7 @@ impl Daemon {
     /// Fetch the given transactions in parallel over multiple threads and RPC connections,
     /// ignoring any missing ones and returning whatever is available.
     #[trace]
-    pub fn gettransactions_available(&self, txids: &[&Txid]) -> Result<Vec<(Txid, Transaction)>> {
+    pub fn gettransactions_available(&self, txids: &[&Txid]) -> Result<HashMap<Txid, Transaction>> {
         const RPC_INVALID_ADDRESS_OR_KEY: i64 = -5;
 
         let params_list: Vec<Value> = txids
