@@ -590,6 +590,12 @@ impl Mempool {
                     "failed to fetch {} mempool txs, retrying...",
                     new_txids.len() - fetched_count
                 );
+                let missing_txids: Vec<_> = new_txids
+                    .iter()
+                    .filter(|txid| !fetched_txs.contains_key(**txid))
+                    .take(10)
+                    .collect();
+                warn!("missing mempool txids: {:?} (capped at 10)", missing_txids);
             } else {
                 break;
             }
