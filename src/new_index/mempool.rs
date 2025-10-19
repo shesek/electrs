@@ -540,8 +540,7 @@ impl Mempool {
 
         // Find transactions available in bitcoind's mempool but not indexed locally
         let new_txids = bitcoind_txids
-            .iter()
-            .filter(|&txid| !indexed_txids.contains(txid))
+            .difference(&indexed_txids)
             .collect::<Vec<_>>();
 
         debug!(
