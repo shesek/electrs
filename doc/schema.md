@@ -44,7 +44,7 @@ When the indexer is synced up to the tip of the chain, the hash of the tip is sa
 
 Each transaction results in the following new row:
 
- * `"C{txid}" → "{confirmed-height}"`
+ * `"C{txid}" → "{confirmed-height}{block-tx-position}"`
 
 Each funding output (except for provably unspendable ones when `--index-unspendables` is not enabled) results in the following new row (`H` is for history, `F` is for funding):
 

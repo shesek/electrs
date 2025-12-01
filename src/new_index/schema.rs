@@ -18,12 +18,8 @@ use elements::{
 };
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::convert::TryInto;
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 
-use crate::{chain::{
-    BlockHash, BlockHeader, Network, OutPoint, Script, Transaction, TxOut, Txid, Value,
-}, new_index::db_metrics::RocksDbMetrics};
 use crate::config::Config;
 use crate::daemon::Daemon;
 use crate::errors::*;
@@ -31,6 +27,10 @@ use crate::metrics::{Gauge, HistogramOpts, HistogramTimer, HistogramVec, MetricO
 use crate::util::{
     bincode, full_hash, has_prevout, is_spendable, BlockHeaderMeta, BlockId, BlockMeta,
     BlockStatus, Bytes, HeaderEntry, HeaderList, ScriptToAddr,
+};
+use crate::{
+    chain::{BlockHash, BlockHeader, Network, OutPoint, Script, Transaction, TxOut, Txid, Value},
+    new_index::db_metrics::RocksDbMetrics,
 };
 
 use crate::new_index::db::{DBFlush, DBRow, ReverseScanIterator, ScanIterator, DB};
@@ -1062,13 +1062,13 @@ impl ChainQuery {
     pub fn tx_confirming_block(&self, txid: &Txid) -> Option<BlockId> {
         let _timer = self.start_timer("tx_confirming_block");
         let row_value = self.store.history_db.get(&TxConfRow::key(txid))?;
-        let height = TxConfRow::height_from_val(&row_value);
+        let tx_conf = TxConfValue::from_bytes(&row_value);
         let headers = self.store.indexed_headers.read().unwrap();
         // skip over entries that point to non-existing heights (may happen while new/reorged blocks are being processed)
-        Some(headers.header_by_height(height as usize)?.into())
+        Some(headers.header_by_height(tx_conf.height as usize)?.into())
     }
 
-    pub fn lookup_confirmations(&self, txids: BTreeSet<Txid>) -> HashMap<Txid, u32> {
+    pub fn lookup_confirmations(&self, txids: BTreeSet<Txid>) -> HashMap<Txid, TxConfValue> {
         lookup_confirmations(&self.store.history_db, self.best_height() as u32, txids)
     }
 
@@ -1228,15 +1228,15 @@ pub fn lookup_confirmations(
     history_db: &DB,
     tip_height: u32,
     txids: BTreeSet<Txid>,
-) -> HashMap<Txid, u32> {
+) -> HashMap<Txid, TxConfValue> {
     history_db
         .multi_get(txids.iter().map(TxConfRow::key))
         .into_iter()
         .zip(txids)
         .filter_map(|(res, txid)| {
-            let confirmation_height = u32::from_le_bytes(res.unwrap()?.try_into().unwrap());
+            let tx_conf = TxConfValue::from_bytes(&res.unwrap()?);
             // skip over entries that point to non-existing heights (may happen while new/reorged blocks are being processed)
-            (confirmation_height <= tip_height).then_some((txid, confirmation_height))
+            (tx_conf.height <= tip_height).then_some((txid, tx_conf))
         })
         .collect()
 }
@@ -1249,10 +1249,10 @@ fn index_blocks(
     block_entries
         .par_iter() // serialization is CPU-intensive
         .map(|b| {
+            let height = b.entry.height() as u32;
             let mut rows = vec![];
-            for tx in &b.block.txdata {
-                let height = b.entry.height() as u32;
-                index_transaction(tx, height, previous_txos_map, &mut rows, iconfig);
+            for (i, tx) in b.block.txdata.iter().enumerate() {
+                index_transaction(tx, height, i as u32, previous_txos_map, &mut rows, iconfig);
             }
             rows.push(BlockRow::new_done(full_hash(&b.entry.hash()[..])).into_row()); // mark block as "indexed"
             rows
@@ -1265,6 +1265,7 @@ fn index_blocks(
 fn index_transaction(
     tx: &Transaction,
     confirmed_height: u32,
+    tx_pos: u32,
     previous_txos_map: &HashMap<OutPoint, TxOut>,
     rows: &mut Vec<DBRow>,
     iconfig: &IndexerConfig,
@@ -1272,8 +1273,8 @@ fn index_transaction(
     let txid = full_hash(&tx.compute_txid()[..]);
 
     // persist tx confirmation row:
-    //      C{txid} → "{block_height}"
-    rows.push(TxConfRow::new(txid, confirmed_height).into_row());
+    //      C{txid} → "{block_height}{block_tx_position}"
+    rows.push(TxConfRow::new(txid, confirmed_height, tx_pos).into_row());
 
     // persist history index:
     //      H{funding-scripthash}{funding-height}F{funding-txid:vout} → ""
@@ -1401,17 +1402,23 @@ pub struct TxConfKey {
     txid: FullHash,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct TxConfValue {
+    pub height: u32, // confirmation height
+    pub tx_pos: u32, // tx position within the block
+}
+
 pub struct TxConfRow {
     key: TxConfKey,
-    value: u32, // the confirmation height
+    value: TxConfValue,
 }
 
 impl TxConfRow {
-    pub fn new(txid: FullHash, height: u32) -> TxConfRow {
+    pub fn new(txid: FullHash, height: u32, tx_pos: u32) -> TxConfRow {
         let txid = full_hash(&txid[..]);
         TxConfRow {
             key: TxConfKey { code: b'C', txid },
-            value: height,
+            value: TxConfValue { height, tx_pos },
         }
     }
 
@@ -1426,12 +1433,14 @@ impl TxConfRow {
     pub fn into_row(self) -> DBRow {
         DBRow {
             key: bincode::serialize_little(&self.key).unwrap(),
-            value: self.value.to_le_bytes().to_vec(),
+            value: bincode::serialize_little(&self.value).unwrap(),
         }
     }
+}
 
-    fn height_from_val(val: &[u8]) -> u32 {
-        u32::from_le_bytes(val.try_into().expect("invalid TxConf value"))
+impl TxConfValue {
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        bincode::deserialize_little(bytes).expect("invalid TxConfValue")
     }
 }
 
