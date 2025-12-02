@@ -158,9 +158,8 @@ impl HeaderList {
             let new_height = if *prev_blockhash == *DEFAULT_BLOCKHASH {
                 0
             } else {
-                self.header_by_blockhash(prev_blockhash)
+                self.height_by_hash(prev_blockhash)
                     .expect("headers do not connect")
-                    .height()
                     + 1
             };
             let header_entries = (new_height..)
@@ -175,12 +174,8 @@ impl HeaderList {
         } else {
             // No new headers, but the new tip could potentially shorten the chain (or be a no-op if it matches the existing tip)
             // This should not normally happen, but might due to manual `invalidateblock`
-            let new_height = self
-                .header_by_blockhash(new_tip)
-                .expect("new tip not in chain")
-                .height()
-                + 1;
-            (new_height, vec![])
+            let new_tip_height = self.height_by_hash(new_tip).expect("new tip not in chain");
+            (new_tip_height + 1, vec![])
         };
         let reorged_since = (new_height < self.len()).then_some(new_height);
         (header_entries, reorged_since)
@@ -253,6 +248,10 @@ impl HeaderList {
             assert_eq!(entry.height(), height);
             entry
         })
+    }
+
+    pub fn height_by_hash(&self, blockhash: &BlockHash) -> Option<usize> {
+        self.heights.get(blockhash).copied()
     }
 
     pub fn equals(&self, other: &HeaderList) -> bool {

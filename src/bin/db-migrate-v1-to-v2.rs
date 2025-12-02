@@ -11,8 +11,8 @@ use bitcoin::hashes::Hash;
 use electrs::chain::{BlockHash, Txid};
 use electrs::new_index::db::DBFlush;
 use electrs::new_index::schema::{
-    lookup_confirmations, FullHash, Store, TxConfRow as V2TxConfRow, TxEdgeRow as V2TxEdgeRow,
-    TxHistoryKey,
+    lookup_confirmations, BlockRow, FullHash, Store, TxConfRow as V2TxConfRow,
+    TxEdgeRow as V2TxEdgeRow, TxHistoryKey,
 };
 use electrs::util::bincode::{deserialize_big, deserialize_little, serialize_little};
 use electrs::{config::Config, metrics::Metrics};
@@ -21,6 +21,7 @@ const FROM_DB_VERSION: u32 = 1;
 const TO_DB_VERSION: u32 = 2;
 
 const BATCH_SIZE: usize = 15000;
+const BLOCK_BATCH_SIZE: usize = 10;
 const PROGRESS_EVERY: usize = BATCH_SIZE * 50;
 
 // For Elements-based chains the 'I' asset history index is migrated too
@@ -45,6 +46,11 @@ fn main() {
         let ver_bytes = db.get(b"V").expect("missing DB version");
         let ver: u32 = deserialize_little(&ver_bytes[0..4]).unwrap();
         assert_eq!(ver, FROM_DB_VERSION, "unexpected DB version {}", ver);
+        // Migration depends on the 'X' index, which is not kept in lightmode
+        assert!(
+            ver_bytes.len() == 4,
+            "lightmode DBs cannot be migrated, reindex instead"
+        );
     }
 
     // Utility to log progress once every PROGRESS_EVERY ticks
@@ -85,35 +91,47 @@ fn main() {
     // - Entries originating from stale blocks are removed
     // Steps 3/4 depend on this index getting migrated first
     info!("[2/4] migrating TxConf index...");
-    let txconf_iter = txstore_db.iter_scan(b"C");
-    for chunk in &txconf_iter.chunks(BATCH_SIZE) {
+    // V1 TxConf entries can be deleted right away, V2 is rebuilt from the 'X' block->txids index
+    info!("[2/4] deleting V1 TxConf from txstore db");
+    txstore_db.delete_range(b"C", b"D", DBFlush::Enable);
+    info!("[2/4] rebuilding V2 TxConf to history db");
+    let blocks_txids_iter = txstore_db.iter_scan(b"X");
+    // Use a smaller BLOCK_BATCH_SIZE to keep the worst-case batch size reasonable sized for large blocks (a full block with typical txs results in ~3-4k TxConf entries).
+    // Small blocks will produce small batches, which is acceptable since the per-batch overhead is low with sync/WAL disabled.
+    for chunk in &blocks_txids_iter.chunks(BLOCK_BATCH_SIZE) {
         let mut batch = WriteBatch::default();
-        for v1_row in chunk {
-            let v1_txconf: V1TxConfKey =
-                deserialize_little(&v1_row.key).expect("invalid TxConfKey");
-            let blockhash = BlockHash::from_byte_array(v1_txconf.blockhash);
-            if let Some(header) = headers.header_by_blockhash(&blockhash) {
-                // The blockhash is still part of the best chain, use its height to construct the V2 row
-                let v2_row = V2TxConfRow::new(v1_txconf.txid, header.height() as u32).into_row();
-                batch.put(v2_row.key, v2_row.value);
+        for row in chunk {
+            let row = BlockRow::from_row(row);
+            let blockhash = BlockHash::from_byte_array(row.key.hash);
+
+            if let Some(block_height) = headers.height_by_hash(&blockhash) {
+                // The block is still part of the best chain, write V2 entries for its txids
+                let block_txids: Vec<Txid> =
+                    deserialize_little(&row.value).expect("invalid block txids");
+                let block_height = block_height as u32;
+
+                for (tx_pos, txid) in block_txids.into_iter().enumerate() {
+                    let v2_row =
+                        V2TxConfRow::new(txid.to_byte_array(), block_height, tx_pos as u32)
+                            .into_row();
+                    batch.put(v2_row.key, v2_row.value);
+
+                    progress!(
+                        "[2/4] migrating TxConf index ~{:.2}%",
+                        est_hash_progress(&row.key.hash) // can estimate using the blockhash's prefix since the PoW zero bits are actually suffixed in the underlying byte representation
+                    );
+                }
             } else {
-                // The transaction was reorged, don't write the V2 entry
-                // trace!("[2/4] skipping reorged TxConf for {}", Txid::from_byte_array(txconf.txid));
+                // Stale block, don't write any V2 entries for it
+                // trace!("[2/4] skipping stale block {}", blockhash);
             }
-            progress!(
-                "[2/4] migrating TxConf index ~{:.2}%",
-                est_hash_progress(&v1_txconf.txid)
-            );
         }
         // Write batches without flushing (sync and WAL disabled)
         trace!("[2/4] writing batch of {} ops", batch.len());
         history_db.write_batch(batch, DBFlush::Disable);
     }
-    // Flush the history db, only then delete the original rows from the txstore db
     info!("[2/4] flushing V2 TxConf to history db");
     history_db.flush();
-    info!("[2/4] deleting V1 TxConf from txstore db");
-    txstore_db.delete_range(b"C", b"D", DBFlush::Enable);
 
     // 3. Migrate the TxEdge spending index
     // - Changed from a set of inputs seen to spend the outpoint to a single spending input (that is part of the best chain)
@@ -143,14 +161,14 @@ fn main() {
             // Remove the old V1 entry. V2 entries use a different key.
             batch.delete(v1_db_key);
 
-            if let Some(spending_height) = confirmations.get(&spending_txid) {
+            if let Some(tx_conf) = confirmations.get(&spending_txid) {
                 // Re-add the V2 entry if it is still part of the best chain
                 let v2_row = V2TxEdgeRow::new(
                     v1_edge.funding_txid,
                     v1_edge.funding_vout,
                     v1_edge.spending_txid,
                     v1_edge.spending_vin,
-                    *spending_height, // now with the height included
+                    tx_conf.height, // now with the height included
                 )
                 .into_row();
                 batch.put(v2_row.key, v2_row.value);
@@ -192,7 +210,7 @@ fn main() {
             let mut batch = WriteBatch::default();
             for (hist, db_key) in history_entries {
                 let hist_txid = hist.txinfo.get_txid();
-                if confirmations.get(&hist_txid) != Some(&hist.confirmed_height) {
+                if confirmations.get(&hist_txid).map(|c| c.height) != Some(hist.confirmed_height) {
                     // The history entry originated from a stale block, remove it
                     batch.delete(db_key);
                     // trace!("[4/4] removing reorged TxHistory for {}", hist.txinfo.get_txid());
@@ -214,7 +232,7 @@ fn main() {
     history_db.flush();
 
     // Update the DB version under `V`
-    let ver_bytes = serialize_little(&(TO_DB_VERSION, config.light_mode)).unwrap();
+    let ver_bytes = serialize_little(&(TO_DB_VERSION, /*lightmode=*/ false)).unwrap();
     for db in [txstore_db, history_db, cache_db] {
         db.put_sync(b"V", &ver_bytes);
     }
@@ -227,14 +245,6 @@ fn main() {
 // Estimates progress using the first 4 bytes, relying on RocksDB's lexicographic key ordering and uniform hash distribution
 fn est_hash_progress(hash: &FullHash) -> f32 {
     u32::from_be_bytes(hash[0..4].try_into().unwrap()) as f32 / u32::MAX as f32 * 100f32
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct V1TxConfKey {
-    #[allow(dead_code)]
-    code: u8,
-    txid: FullHash,
-    blockhash: FullHash,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]

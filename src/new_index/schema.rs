@@ -899,8 +899,7 @@ impl ChainQuery {
             .indexed_headers
             .read()
             .unwrap()
-            .header_by_blockhash(hash)
-            .map(|header| header.height())
+            .height_by_hash(hash)
     }
 
     pub fn header_by_height(&self, height: usize) -> Option<HeaderEntry> {
@@ -1485,14 +1484,14 @@ impl TxOutRow {
 }
 
 #[derive(Serialize, Deserialize)]
-struct BlockKey {
+pub struct BlockKey {
     code: u8,
-    hash: FullHash,
+    pub hash: FullHash,
 }
 
-struct BlockRow {
-    key: BlockKey,
-    value: Bytes, // serialized output
+pub struct BlockRow {
+    pub key: BlockKey,
+    pub value: Bytes, // serialized header, txids, meta, or empty for "done"
 }
 
 impl BlockRow {
@@ -1550,7 +1549,7 @@ impl BlockRow {
         }
     }
 
-    fn from_row(row: DBRow) -> Self {
+    pub fn from_row(row: DBRow) -> Self {
         BlockRow {
             key: bincode::deserialize_little(&row.key).unwrap(),
             value: row.value,
