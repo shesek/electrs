@@ -489,7 +489,7 @@ impl ChainQuery {
         } else {
             self.store
                 .txstore_db
-                .get(&BlockRow::txids_key(full_hash(&hash[..])))
+                .get(&BlockRow::txids_key(&hash[..]))
                 .map(|val| bincode::deserialize_little(&val).expect("failed to parse block txids"))
         }
     }
@@ -525,7 +525,7 @@ impl ChainQuery {
         } else {
             self.store
                 .txstore_db
-                .get(&BlockRow::meta_key(full_hash(&hash[..])))
+                .get(&BlockRow::meta_key(&hash[..]))
                 .map(|val| bincode::deserialize_little(&val).expect("failed to parse BlockMeta"))
         }
     }
@@ -1530,12 +1530,16 @@ impl BlockRow {
         b"B".to_vec()
     }
 
-    fn txids_key(hash: FullHash) -> Bytes {
-        [b"X", &hash[..]].concat()
+    fn txids_key(hash: &[u8]) -> Bytes {
+        [b"X", hash].concat()
     }
 
-    fn meta_key(hash: FullHash) -> Bytes {
-        [b"M", &hash[..]].concat()
+    fn meta_key(hash: &[u8]) -> Bytes {
+        [b"M", hash].concat()
+    }
+
+    pub fn done_key(hash: &[u8]) -> Bytes {
+        [b"D", hash].concat()
     }
 
     fn done_filter() -> Bytes {

@@ -90,11 +90,11 @@ fn main() {
     // - Changed from the block hash to the block height
     // - Entries originating from stale blocks are removed
     // Steps 3/4 depend on this index getting migrated first
-    info!("[2/4] migrating TxConf index...");
+    info!("[2/4] migrating TxConf/BlockDone indexes...");
     // V1 TxConf entries can be deleted right away, V2 is rebuilt from the 'X' block->txids index
     info!("[2/4] deleting V1 TxConf from txstore db");
     txstore_db.delete_range(b"C", b"D", DBFlush::Enable);
-    info!("[2/4] rebuilding V2 TxConf to history db");
+    info!("[2/4] rebuilding V2 TxConf, removing stale BlockDone");
     let blocks_txids_iter = txstore_db.iter_scan(b"X");
     // Use a smaller BLOCK_BATCH_SIZE to keep the worst-case batch size reasonable sized for large blocks (a full block with typical txs results in ~3-4k TxConf entries).
     // Small blocks will produce small batches, which is acceptable since the per-batch overhead is low with sync/WAL disabled.
@@ -117,20 +117,21 @@ fn main() {
                     batch.put(v2_row.key, v2_row.value);
 
                     progress!(
-                        "[2/4] migrating TxConf index ~{:.2}%",
+                        "[2/4] migrating TxConf/BlockDone ~{:.2}%",
                         est_hash_progress(&row.key.hash) // can estimate using the blockhash's prefix since the PoW zero bits are actually suffixed in the underlying byte representation
                     );
                 }
             } else {
-                // Stale block, don't write any V2 entries for it
-                // trace!("[2/4] skipping stale block {}", blockhash);
+                // The block is stale, delete the 'D' marker indicating it was indexed and don't write V2 TxConf entries for it
+                batch.delete(BlockRow::done_key(&row.key.hash));
+                trace!("[2/4] stale block {}", blockhash);
             }
         }
         // Write batches without flushing (sync and WAL disabled)
         trace!("[2/4] writing batch of {} ops", batch.len());
         history_db.write_batch(batch, DBFlush::Disable);
     }
-    info!("[2/4] flushing V2 TxConf to history db");
+    info!("[2/4] flushing V2 TxConf entries and BlockDone deletions to history db");
     history_db.flush();
 
     // 3. Migrate the TxEdge spending index
