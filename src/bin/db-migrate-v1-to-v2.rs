@@ -11,8 +11,7 @@ use bitcoin::hashes::Hash;
 use electrs::chain::{BlockHash, Txid};
 use electrs::new_index::db::DBFlush;
 use electrs::new_index::schema::{
-    lookup_confirmations, FullHash, Store, TxConfRow as V2TxConfRow, TxEdgeRow as V2TxEdgeRow,
-    TxHistoryKey,
+    lookup_confirmations, FullHash, Store, TxConfRow as V2TxConfRow, TxHistoryKey,
 };
 use electrs::util::bincode::{deserialize_big, deserialize_little, serialize_little};
 use electrs::{config::Config, metrics::Metrics};
@@ -244,6 +243,55 @@ struct V1TxEdgeKey {
     funding_vout: u16,
     spending_txid: FullHash,
     spending_vin: u16,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct V2TxEdgeKey {
+    code: u8,
+    funding_txid: FullHash,
+    funding_vout: u16,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct V2TxEdgeValue {
+    spending_txid: FullHash,
+    spending_vin: u16,
+    spending_height: u32,
+}
+
+struct V2TxEdgeRow {
+    key: V2TxEdgeKey,
+    value: V2TxEdgeValue,
+}
+
+impl V2TxEdgeRow {
+    fn new(
+        funding_txid: FullHash,
+        funding_vout: u16,
+        spending_txid: FullHash,
+        spending_vin: u16,
+        spending_height: u32,
+    ) -> Self {
+        Self {
+            key: V2TxEdgeKey {
+                code: b'S',
+                funding_txid,
+                funding_vout,
+            },
+            value: V2TxEdgeValue {
+                spending_txid,
+                spending_vin,
+                spending_height,
+            },
+        }
+    }
+
+    fn into_row(self) -> electrs::new_index::DBRow {
+        electrs::new_index::DBRow {
+            key: serialize_little(&self.key).unwrap(),
+            value: serialize_little(&self.value).unwrap(),
+        }
+    }
 }
 
 /*
