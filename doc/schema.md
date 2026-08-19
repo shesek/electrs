@@ -14,14 +14,16 @@ storing blocks, transactions, outputs and scripthash funding/spending history.
 
 There are two indexing modes:
 
-- Default (non-Elements) mode: fetches previous outputs from bitcoind's binary
-  REST `spenttxouts` endpoint. Because indexing does not depend on local RocksDB
-  TXO lookups, blocks can be fully processed in parallel and in any order.
+- Default (non-Elements) mode: when supported by Bitcoin Core (v30+), fetches
+  previous outputs from its binary REST `spenttxouts` endpoint. Because indexing
+  does not depend on local RocksDB TXO lookups, blocks can be fully processed in
+  parallel and in any order.
 
-- Legacy mode: used for Elements and Bitcoin Core &lt;v30 (with `--no-spenttxouts`),
-  which do not support `spenttxouts`. Indexing is done in two phases, where each can be
-  done concurrently within itself: first populate `txstore` with block/transaction/output
-  data, then populate `history` by looking up spent TXOs in `txstore`.
+- Legacy mode: used automatically for Elements or when Bitcoin Core does not
+  support `spenttxouts`. Indexing is done in two phases, where each can be done
+  concurrently within itself: first populate `txstore` with
+  block/transaction/output data, then populate `history` by looking up spent
+  TXOs in `txstore`.
 
 After the indexing is completed, both funding and spending are indexed as independent
 rows under `H{scripthash}`, so that they can be queried in-order in one go.

@@ -774,6 +774,9 @@ impl Daemon {
         if blockchain_info.pruned {
             bail!("pruned node is not supported (use '-prune=0' bitcoind flag)".to_owned())
         }
+        daemon
+            .rest_get("chaininfo.json", |_, _| Ok(false))
+            .chain_err(|| "daemon REST API unavailable (enabling '-rest' is required)")?;
         loop {
             let info = daemon.getblockchaininfo()?;
 
@@ -817,6 +820,22 @@ impl Daemon {
         F: FnOnce() -> T + Send,
     {
         self.request_pool.install(f)
+    }
+
+    #[cfg(not(feature = "liquid"))]
+    pub fn supports_spenttxouts(&self) -> bool {
+        match self.get_spent_txouts(&crate::chain::genesis_hash(self.network)) {
+            Ok(_) => true,
+            Err(err) => {
+                debug!("REST spenttxouts check failed: {}", err.display_chain());
+                false
+            }
+        }
+    }
+
+    #[cfg(feature = "liquid")]
+    pub fn supports_spenttxouts(&self) -> bool {
+        false
     }
 
     #[trace]
@@ -1410,18 +1429,16 @@ impl Daemon {
     /// Returns one Vec<TxOut> per non-coinbase transaction, with TxOuts ordered
     /// by input index.
     ///
-    /// Requires bitcoind started with -rest=1.
+    /// Requires Bitcoin Core 30+ started with -rest=1.
     #[cfg(not(feature = "liquid"))]
     pub fn get_spent_txouts(&self, blockhash: &BlockHash) -> Result<Vec<Vec<bitcoin::TxOut>>> {
-        let mut response = self.rest_get(
-            &format!("spenttxouts/{}.bin", blockhash),
-            |status, body| {
+        let mut response =
+            self.rest_get(&format!("spenttxouts/{}.bin", blockhash), |status, body| {
                 bail!(ErrorKind::Connection(format!(
-                    "REST spenttxouts failed for {} with status {} (is bitcoind running with -rest=1?): {}",
+                    "REST spenttxouts failed for {} with status {}: {}",
                     blockhash, status, body
                 )))
-            },
-        )?;
+            })?;
         let mut reader = BufReader::new(response.body_mut().as_reader());
         parse_spent_txouts(&mut reader)
     }

@@ -23,8 +23,6 @@ fn main() {
 
     let signal = Waiter::start(crossbeam_channel::never());
     let config = Config::from_args();
-    let metrics = Metrics::new(config.monitoring_addr);
-    let store = Arc::new(Store::open(&config, &metrics));
 
     let metrics = Metrics::new(config.monitoring_addr);
     metrics.start();
@@ -44,9 +42,10 @@ fn main() {
         .unwrap(),
     );
 
+    let store = Arc::new(Store::open(&config, &metrics));
     let chain = ChainQuery::new(Arc::clone(&store), &config, &metrics);
 
-    let mut indexer = Indexer::open(Arc::clone(&store), &config, &metrics);
+    let mut indexer = Indexer::open(Arc::clone(&store), &config, &metrics, &daemon);
     indexer.update(&daemon).unwrap();
 
     let mut iter = store.txstore_db().raw_iterator();

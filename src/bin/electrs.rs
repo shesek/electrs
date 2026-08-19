@@ -61,7 +61,7 @@ fn run_server(config: Arc<Config>, salt_rwlock: Arc<RwLock<String>>) -> Result<(
     )?);
     info!("opening database at {}", config.db_path.display());
     let store = Arc::new(Store::open(&config, &metrics));
-    let mut indexer = Indexer::open(Arc::clone(&store), &config, &metrics);
+    let mut indexer = Indexer::open(Arc::clone(&store), &config, &metrics, &daemon);
     info!("starting initial sync");
     let mut tip = indexer.update(&daemon)?;
     info!("initial sync complete, tip at {}", tip);

@@ -247,15 +247,18 @@ struct IndexerConfig {
     parent_network: crate::chain::BNetwork,
 }
 
-impl From<&Config> for IndexerConfig {
-    fn from(config: &Config) -> Self {
+impl IndexerConfig {
+    fn new(config: &Config, use_spenttxouts: bool) -> Self {
+        #[cfg(feature = "liquid")]
+        assert!(!use_spenttxouts);
+
         IndexerConfig {
             address_search: config.address_search,
             index_unspendables: config.index_unspendables,
             network: config.network_type,
             block_batch_size: config.initial_sync_batch_size,
             #[cfg(not(feature = "liquid"))]
-            use_spenttxouts: config.use_spenttxouts,
+            use_spenttxouts,
             #[cfg(feature = "liquid")]
             parent_network: config.parent_network,
         }
@@ -270,11 +273,16 @@ pub struct ChainQuery {
 
 // TODO: &[Block] should be an iterator / a queue.
 impl Indexer {
-    pub fn open(store: Arc<Store>, config: &Config, metrics: &Metrics) -> Self {
+    pub fn open(store: Arc<Store>, config: &Config, metrics: &Metrics, daemon: &Daemon) -> Self {
+        let use_spenttxouts = daemon.supports_spenttxouts();
+        if !use_spenttxouts && !cfg!(feature = "liquid") {
+            warn!("REST spenttxouts unavailable, using legacy indexer (upgrade to Bitcoin Core 30+ for the new, more efficient indexer)");
+        }
+
         Indexer {
             store,
             flush: DBFlush::Disable,
-            iconfig: IndexerConfig::from(config),
+            iconfig: IndexerConfig::new(config, use_spenttxouts),
             duration: metrics.histogram_vec(
                 HistogramOpts::new("index_duration", "Index update duration (in seconds)"),
                 &["step"],
