@@ -527,6 +527,22 @@ pub fn open_rocksdb(path: &Path, config: &Config) -> rocksdb::DB {
     db
 }
 
+#[cfg(all(test, not(feature = "liquid")))]
+pub(super) fn open_test_rocksdb(path: &Path) -> rocksdb::DB {
+    let mut db_opts = rocksdb::Options::default();
+    db_opts.create_if_missing(true);
+    db_opts.create_missing_column_families(true);
+    db_opts.set_atomic_flush(true);
+
+    let cf_descriptors = [DEFAULT_CF, TXSTORE_CF, HISTORY_CF, CACHE_CF]
+        .iter()
+        .copied()
+        .map(|name| ColumnFamilyDescriptor::new(name, rocksdb::Options::default()));
+
+    rocksdb::DB::open_cf_descriptors(&db_opts, path, cf_descriptors)
+        .expect("failed to open test RocksDB")
+}
+
 fn verify_compatibility(db: &rocksdb::DB) {
     let compatibility_bytes = bincode::serialize_little(&DB_VERSION).unwrap();
     let cf = db

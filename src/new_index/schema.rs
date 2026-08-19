@@ -66,6 +66,23 @@ pub struct Store {
 impl Store {
     pub fn open(config: &Config, metrics: &Metrics) -> Self {
         let db = Arc::new(db::open_rocksdb(&config.db_path, config));
+        let store = Self::from_db(db);
+
+        let db_metrics = Arc::new(RocksDbMetrics::new(&metrics));
+        store
+            .txstore_db
+            .start_stats_exporter(Arc::clone(&db_metrics), "txstore_db");
+        store
+            .history_db
+            .start_stats_exporter(Arc::clone(&db_metrics), "history_db");
+        store
+            .cache_db
+            .start_stats_exporter(Arc::clone(&db_metrics), "cache_db");
+
+        store
+    }
+
+    fn from_db(db: Arc<rocksdb::DB>) -> Self {
         let default_db = DB::default_cf(Arc::clone(&db));
         let txstore_db = DB::txstore_cf(Arc::clone(&db));
         let history_db = DB::history_cf(Arc::clone(&db));
@@ -76,11 +93,6 @@ impl Store {
 
         let indexed_blockhashes = load_blockhashes(&history_db, &BlockRow::done_filter());
         info!("{} blocks were indexed", indexed_blockhashes.len());
-
-        let db_metrics = Arc::new(RocksDbMetrics::new(&metrics));
-        txstore_db.start_stats_exporter(Arc::clone(&db_metrics), "txstore_db");
-        history_db.start_stats_exporter(Arc::clone(&db_metrics), "history_db");
-        cache_db.start_stats_exporter(Arc::clone(&db_metrics), "cache_db");
 
         // Construct the `HeaderList` from persisted `t` and `D` markers
         let headers = if let Some(tip_hash) = default_db.get(b"t") {
@@ -2228,6 +2240,130 @@ mod tests {
     use bitcoin::hex::FromHex;
 
     use super::*;
+
+    #[cfg(not(feature = "liquid"))]
+    mod store_recovery {
+        use bitcoin::blockdata::constants::genesis_block;
+        use bitcoin::Network as BitcoinNetwork;
+
+        use super::*;
+
+        fn test_store() -> (tempfile::TempDir, Store) {
+            let dir = tempfile::tempdir().unwrap();
+            let db = Arc::new(db::open_test_rocksdb(dir.path()));
+            (dir, Store::from_db(db))
+        }
+
+        fn write_headers(db: &DB, entries: &[HeaderEntry]) {
+            let rows = entries
+                .iter()
+                .cloned()
+                .map(|entry| {
+                    let block_entry = BlockEntry {
+                        block: Block {
+                            header: entry.header().clone(),
+                            txdata: vec![],
+                        },
+                        entry,
+                        size: 0,
+                        txids: vec![],
+                    };
+                    BlockRow::new_header(&block_entry).into_row()
+                })
+                .collect();
+            db.write_rows(rows, DBFlush::Enable);
+        }
+
+        fn write_done<'a>(db: &DB, entries: impl IntoIterator<Item = &'a HeaderEntry>) {
+            let rows = entries
+                .into_iter()
+                .map(|entry| BlockRow::new_done(full_hash(&entry.hash()[..])).into_row())
+                .collect();
+            db.write_rows(rows, DBFlush::Enable);
+        }
+
+        fn header_chain(len: usize) -> Vec<HeaderEntry> {
+            let mut header = genesis_block(BitcoinNetwork::Regtest).header;
+            let mut chain: Vec<HeaderEntry> = vec![];
+
+            for height in 0..len {
+                if let Some(previous) = chain.last() {
+                    header.prev_blockhash = *previous.hash();
+                }
+                let entry = HeaderEntry::new(height, header.block_hash(), header.clone());
+                chain.push(entry);
+            }
+
+            chain
+        }
+
+        #[test]
+        fn completed_blocks_without_tip_remain_hidden() {
+            let chain = header_chain(3);
+            let (_dir, store) = test_store();
+            write_headers(&store.txstore_db, &chain);
+            write_done(&store.txstore_db, &chain);
+            write_done(&store.history_db, &chain);
+
+            let store = Store::from_db(Arc::clone(&store.db));
+
+            assert!(store.headers().is_empty());
+            let expected: HashSet<_> = chain.iter().map(|entry| *entry.hash()).collect();
+            assert_eq!(*store.added_blockhashes.read().unwrap(), expected);
+            assert_eq!(*store.indexed_blockhashes.read().unwrap(), expected);
+        }
+
+        #[test]
+        fn tip_hides_suffix_and_preserves_completion_markers() {
+            let chain = header_chain(6);
+            let (_dir, store) = test_store();
+            write_headers(&store.txstore_db, &chain);
+            store.update_tip(chain[1].hash());
+            // Save both markers for blocks 0-2, txstore-only for 3, history-only for 4 and neither for 5.
+            write_done(&store.txstore_db, chain[..=3].iter());
+            write_done(&store.history_db, chain[..=2].iter().chain(&chain[4..=4]));
+
+            let store = Store::from_db(Arc::clone(&store.db));
+
+            assert_eq!(store.headers().len(), 2);
+            assert_eq!(store.headers().tip(), chain[1].hash());
+
+            let added = store.added_blockhashes.read().unwrap();
+            let indexed = store.indexed_blockhashes.read().unwrap();
+            assert!(added.contains(chain[2].hash()));
+            assert!(indexed.contains(chain[2].hash()));
+            assert!(added.contains(chain[3].hash()));
+            assert!(!indexed.contains(chain[3].hash()));
+            assert!(!added.contains(chain[4].hash()));
+            assert!(indexed.contains(chain[4].hash()));
+            assert!(!added.contains(chain[5].hash()));
+            assert!(!indexed.contains(chain[5].hash()));
+        }
+
+        #[test]
+        fn visibility_stops_at_first_one_sided_completion() {
+            for missing_txstore in [false, true] {
+                let chain = header_chain(4);
+                let (_dir, store) = test_store();
+                write_headers(&store.txstore_db, &chain);
+                store.update_tip(chain[3].hash());
+
+                // Save both markers for blocks 0, 1 and 3, plus a single-sided marker for 2.
+                if missing_txstore {
+                    write_done(&store.txstore_db, chain[..2].iter().chain(&chain[3..]));
+                    write_done(&store.history_db, &chain);
+                } else {
+                    write_done(&store.txstore_db, &chain);
+                    write_done(&store.history_db, chain[..2].iter().chain(&chain[3..]));
+                }
+
+                let store = Store::from_db(Arc::clone(&store.db));
+
+                assert_eq!(store.headers().len(), 2);
+                assert_eq!(store.headers().tip(), chain[1].hash());
+            }
+        }
+    }
 
     #[test]
     fn test_compute_script_hash_p2pkh() {
