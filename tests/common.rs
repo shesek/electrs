@@ -125,8 +125,10 @@ impl TestRunner {
             db_write_buffer_size_mb: 256,
             initial_sync_batch_size: 250,
             db_cache_index_filter_blocks: false,
-            #[cfg(not(feature = "liquid"))]
+            #[cfg(all(not(feature = "liquid"), feature = "test-core-30"))]
             use_spenttxouts: true,
+            #[cfg(all(not(feature = "liquid"), feature = "test-core-29"))]
+            use_spenttxouts: false,
             //#[cfg(feature = "electrum-discovery")]
             //electrum_public_hosts: Option<crate::electrum::ServerHosts>,
             //#[cfg(feature = "electrum-discovery")]
