@@ -114,6 +114,7 @@ impl DB {
                 "sentinel 'F' present in {} — using steady-state L0 triggers",
                 cf_name
             );
+            db.apply_steady_state_triggers();
         }
         db
     }
@@ -159,29 +160,23 @@ impl DB {
         //
         // With bloom filters at 10 bits/key and a 128 MB write buffer, each L0
         // file has ~3.9 M keys, so its filter block is ~4.9 MB. At the slowdown
-        // threshold (96 files) that is ~470 MB of pinned filter blocks per CF,
-        // ~1.41 GB across 3 data CFs — within a 2 GB cache. At the stop threshold
-        // (128 files) it is ~628 MB per CF / ~1.88 GB total, still within bounds.
+        // threshold (48 files) that is ~235 MB of pinned filter blocks per CF,
+        // ~705 MB across 3 data CFs — within a 2 GB cache. At the stop threshold
+        // (64 files) it is ~314 MB per CF / ~940 MB total, still within bounds.
         // Previously trigger=64 with 256 MB buffers caused pinned metadata to
         // overflow the 2 GB cache at L0=128 (~3.7 GB), spilling to uncontrolled
-        // heap and triggering OOM. Trigger=32 + slowdown=96 keeps the peak safe
-        // while allowing enough L0 accumulation for good bulk-load throughput.
+        // heap and triggering OOM.
         //
-        // Set slowdown/stop triggers well above the compaction trigger so writes
-        // are never stalled while background compaction catches up.
-        // Disable the pending-compaction-bytes stall so the large backlog that
-        // builds up during the bulk load does not block writes.
-        const L0_BULK_TRIGGER: u32 = 32;
-        let trigger = L0_BULK_TRIGGER.to_string();
-        let slowdown = (L0_BULK_TRIGGER * 3).to_string();
-        let stop = (L0_BULK_TRIGGER * 4).to_string();
+        // Set slowdown/stop triggers above the compaction trigger so RocksDB
+        // throttles writes while background compaction catches up.
+        const L0_BULK_TRIGGER: &str = "32";
+        const L0_BULK_SLOWDOWN: &str = "48";
+        const L0_BULK_STOP: &str = "64";
 
         let opts = [
-            ("level0_file_num_compaction_trigger", trigger.as_str()),
-            ("level0_slowdown_writes_trigger", slowdown.as_str()),
-            ("level0_stop_writes_trigger", stop.as_str()),
-            ("soft_pending_compaction_bytes_limit", "0"),
-            ("hard_pending_compaction_bytes_limit", "0"),
+            ("level0_file_num_compaction_trigger", L0_BULK_TRIGGER),
+            ("level0_slowdown_writes_trigger", L0_BULK_SLOWDOWN),
+            ("level0_stop_writes_trigger", L0_BULK_STOP),
         ];
         self.db.set_options_cf(self.cf(), &opts).unwrap();
     }
@@ -497,9 +492,10 @@ pub fn open_rocksdb(path: &Path, config: &Config) -> rocksdb::DB {
 
     // Parallelize sub-ranges within a single compaction job (including the one-time
     // full_compaction at the end of initial sync). Without this, compact_range() is
-    // single-threaded regardless of increase_parallelism(). Setting it equal to the
-    // parallelism level keeps all background threads busy during the final compaction.
-    db_opts.set_max_subcompactions(parallelism as u32);
+    // single-threaded regardless of increase_parallelism(). Cap it at four because
+    // subcompactions can multiply the configured background-job concurrency:
+    // https://github.com/facebook/rocksdb/wiki/Subcompaction#options
+    db_opts.set_max_subcompactions(parallelism.min(4) as u32);
 
     // Create a single shared LRU cache for all CFs. The total size is
     // --db-block-cache-mb (not multiplied by 3). RocksDB's LRU cache is
@@ -563,7 +559,17 @@ fn data_cf_options(config: &Config, shared_cache: &rocksdb::Cache) -> rocksdb::O
     cf_opts.set_compaction_style(rocksdb::DBCompactionStyle::Level);
     cf_opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
     cf_opts.set_bottommost_compression_type(rocksdb::DBCompressionType::Zstd);
-    cf_opts.set_target_file_size_base(1_073_741_824);
+    cf_opts.set_target_file_size_base((config.db_target_file_size_mb as u64) * 1024 * 1024);
+    // 0 disables the limit. Set finite values via
+    // --db-{soft,hard}-pending-compaction-gb to engage RocksDB's automatic write
+    // throttling when the compaction backlog grows past the threshold. Steady-state
+    // defaults are restored after full compaction.
+    cf_opts.set_soft_pending_compaction_bytes_limit(
+        (config.db_soft_pending_compaction_gb as usize) << 30,
+    );
+    cf_opts.set_hard_pending_compaction_bytes_limit(
+        (config.db_hard_pending_compaction_gb as usize) << 30,
+    );
     // L0 compaction triggers are left at RocksDB defaults (4/20/36) here.
     // After open, apply_bulk_load_triggers() widens them for initial sync
     // when the full-compaction sentinel 'F' is absent.

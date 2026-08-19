@@ -78,6 +78,23 @@ pub struct Config {
     /// per SST file of unbounded memory.
     pub db_cache_index_filter_blocks: bool,
 
+    /// RocksDB target_file_size_base in MB (per CF). Smaller values produce smaller
+    /// L1+ SST files at the cost of more files and more compactions overall. Default
+    /// 1024 (1 GiB).
+    pub db_target_file_size_mb: usize,
+
+    /// Used during initial sync.
+    /// RocksDB soft_pending_compaction_bytes_limit in GiB (per CF). When the estimated
+    /// compaction backlog exceeds this, RocksDB rate-limits writes. 0 disables the limit.
+    /// A finite value (e.g. 8) provides automatic backpressure when compaction falls behind.
+    pub db_soft_pending_compaction_gb: u64,
+
+    /// Used during initial sync.
+    /// RocksDB hard_pending_compaction_bytes_limit in GiB (per CF). When the estimated
+    /// compaction backlog exceeds this, RocksDB stops writes entirely until compaction
+    /// catches up. 0 disables. Should be 3-4x the soft limit (e.g. 32 with soft=8).
+    pub db_hard_pending_compaction_gb: u64,
+
     #[cfg(feature = "liquid")]
     pub parent_network: BNetwork,
     #[cfg(feature = "liquid")]
@@ -282,6 +299,24 @@ impl Config {
                 Arg::with_name("cache_index_filter_blocks")
                     .long("cache-index-filter-blocks")
                     .help("Store index/filter blocks in the block cache instead of on the heap. Bounds memory but allows eviction under cache pressure.")
+             ).arg(
+                Arg::with_name("db_target_file_size_mb")
+                    .long("db-target-file-size-mb")
+                    .help("RocksDB target_file_size_base in MB per CF. Smaller values produce more, smaller L1+ SST files. Default 1024.")
+                    .takes_value(true)
+                    .default_value("1024")
+             ).arg(
+                Arg::with_name("db_soft_pending_compaction_gb")
+                    .long("db-soft-pending-compaction-gb")
+                    .help("RocksDB soft_pending_compaction_bytes_limit in GiB per CF during initial sync. RocksDB rate-limits writes above this. 0 disables.")
+                    .takes_value(true)
+                    .default_value("8")
+             ).arg(
+                Arg::with_name("db_hard_pending_compaction_gb")
+                    .long("db-hard-pending-compaction-gb")
+                    .help("RocksDB hard_pending_compaction_bytes_limit in GiB per CF during initial sync. RocksDB stops writes above this. 0 disables.")
+                    .takes_value(true)
+                    .default_value("32")
              ).arg(
                 Arg::with_name("zmq_addr")
                     .long("zmq-addr")
@@ -543,6 +578,17 @@ impl Config {
             db_write_buffer_size_mb: value_t_or_exit!(m, "db_write_buffer_size_mb", usize),
             initial_sync_batch_size: value_t_or_exit!(m, "initial_sync_batch_size", usize),
             db_cache_index_filter_blocks: m.is_present("cache_index_filter_blocks"),
+            db_target_file_size_mb: value_t_or_exit!(m, "db_target_file_size_mb", usize),
+            db_soft_pending_compaction_gb: value_t_or_exit!(
+                m,
+                "db_soft_pending_compaction_gb",
+                u64
+            ),
+            db_hard_pending_compaction_gb: value_t_or_exit!(
+                m,
+                "db_hard_pending_compaction_gb",
+                u64
+            ),
             zmq_addr,
 
             #[cfg(feature = "liquid")]

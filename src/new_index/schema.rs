@@ -2219,6 +2219,8 @@ pub mod bench {
                 index_unspendables: false,
                 network: crate::chain::Network::Regtest,
                 block_batch_size: 250,
+                #[cfg(not(feature = "liquid"))]
+                use_spenttxouts: false,
             };
             let height = 702861;
             let hash = block.block_hash();
