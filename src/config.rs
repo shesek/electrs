@@ -51,8 +51,8 @@ pub struct Config {
     /// Recommendation: 1024 MB for steady-state; 4096 MB+ for initial sync (L0 SST
     /// files accumulate up to the compaction trigger — their index, filter (Bloom),
     /// and data blocks must fit in this cache). With 10 bits/key bloom filters and
-    /// a 512 MB write buffer, each L0 file's filter block is ~9.75 MB, so 64 L0
-    /// files need ~625 MB of filter blocks on top of index blocks.
+    /// a 128 MB write buffer, each L0 file's filter block is ~4.9 MB, so 32 L0
+    /// files need ~157 MB of filter blocks on top of index blocks.
     pub db_block_cache_mb: usize,
 
     /// RocksDB parallelism level (background compaction and flush threads)
@@ -277,7 +277,7 @@ impl Config {
                     .long("db-write-buffer-size-mb")
                     .help("RocksDB write buffer size in MB per database. RAM usage = size * max_write_buffers(2) * 3_databases")
                     .takes_value(true)
-                    .default_value("256")
+                    .default_value("128")
              ).arg(
                 Arg::with_name("initial_sync_batch_size")
                     .long("initial-sync-batch-size")
