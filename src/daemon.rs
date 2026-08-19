@@ -16,10 +16,12 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use serde_json::{from_str, from_value, Value};
 
 #[cfg(not(feature = "liquid"))]
-use bitcoin::consensus::encode::{deserialize_hex, serialize_hex};
+use bitcoin::consensus::{
+    encode::{deserialize_hex, serialize_hex, VarInt},
+    Decodable,
+};
 #[cfg(feature = "liquid")]
-use elements::encode::{deserialize, serialize_hex};
-#[cfg(not(feature = "liquid"))]
+use elements::encode::{deserialize, serialize_hex, Decodable};
 use rayon::iter::IntoParallelRefIterator;
 
 use electrs_macros::trace;
@@ -90,11 +92,6 @@ fn header_from_value(value: Value) -> Result<BlockHeader> {
         .as_str()
         .chain_err(|| format!("non-string header: {}", value))?;
     deserialize_value(header_hex)
-}
-
-fn block_from_value(value: Value) -> Result<Block> {
-    let block_hex = value.as_str().chain_err(|| "non-string block")?;
-    deserialize_value(block_hex)
 }
 
 fn tx_from_value(value: Value) -> Result<Transaction> {
@@ -291,7 +288,7 @@ struct Connection {
     active_addr: SocketAddr,
     signal: Waiter,
     // When the TCP connection was (re)established, used together with `max_age` to
-    // proactively recycle long-lived connections (see `is_expired`).
+    // proactively recycle long-lived connections (see `should_recycle`).
     established: Instant,
     // Maximum age of a connection before it is proactively recycled, or None for unlimited.
     max_age: Option<Duration>,
@@ -392,6 +389,11 @@ fn recycle_due(
 }
 
 impl Connection {
+    /// Return the active address and connection timestamp, used to identify this connection.
+    fn current(&self) -> (SocketAddr, Instant) {
+        (self.active_addr, self.established)
+    }
+
     #[trace]
     fn new(
         addr: SocketAddr,
@@ -632,6 +634,53 @@ impl Counter {
     }
 }
 
+struct RestAgent {
+    agent: ureq::Agent,
+    pool_created: Instant,
+    max_age: Option<Duration>,
+}
+
+impl RestAgent {
+    fn new(daemon_parallelism: usize, max_age: Option<Duration>) -> Self {
+        RestAgent {
+            agent: ureq::Agent::new_with_config(
+                ureq::Agent::config_builder()
+                    .max_idle_connections(daemon_parallelism * 2)
+                    .max_idle_connections_per_host(daemon_parallelism * 2)
+                    .timeout_connect(Some(*DAEMON_CONNECTION_TIMEOUT))
+                    .timeout_send_request(Some(*DAEMON_WRITE_TIMEOUT))
+                    .timeout_recv_response(Some(*DAEMON_READ_TIMEOUT))
+                    .timeout_recv_body(Some(*DAEMON_READ_TIMEOUT))
+                    .timeout_global(Some(
+                        *DAEMON_CONNECTION_TIMEOUT + *DAEMON_WRITE_TIMEOUT + *DAEMON_READ_TIMEOUT,
+                    ))
+                    .build(),
+            ),
+            pool_created: Instant::now(),
+            max_age,
+        }
+    }
+
+    /// Return an `Agent`, recycling the HTTP connection pool if expired.
+    fn agent(&mut self) -> ureq::Agent {
+        if self
+            .max_age
+            .map_or(false, |max_age| self.pool_created.elapsed() >= max_age)
+        {
+            self.recycle();
+            debug!("recycled REST connection pool");
+        }
+        self.agent.clone() // cheap Arc clone internally
+    }
+
+    /// Reset the HTTP connection pool, so subsequent requests will use new connections.
+    /// In-flight requests will continue using the existing pool.
+    fn recycle(&mut self) {
+        self.agent = ureq::Agent::new_with_config(self.agent.config().clone());
+        self.pool_created = Instant::now();
+    }
+}
+
 pub struct Daemon {
     daemon_dir: PathBuf,
     network: Network,
@@ -639,8 +688,8 @@ pub struct Daemon {
     conn: Mutex<Connection>,
     message_id: Counter, // for monotonic JSONRPC 'id'
     signal: Waiter,
-
-    rpc_threads: Arc<rayon::ThreadPool>,
+    request_pool: Arc<rayon::ThreadPool>,
+    rest_agent: Arc<Mutex<RestAgent>>, // connection-pooling HTTP agent for REST endpoints
 
     // Caps concurrent RPCs issued on behalf of API clients (see `request_proxied`).
     // Shared across reconnects so the cap stays global to the process.
@@ -680,13 +729,14 @@ impl Daemon {
             conn: Mutex::new(conn),
             message_id: Counter::new(),
             signal: signal.clone(),
-            rpc_threads: Arc::new(
+            request_pool: Arc::new(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(daemon_parallelism)
-                    .thread_name(|i| format!("rpc-requests-{}", i))
+                    .thread_name(|i| format!("daemon-requests-{}", i))
                     .build()
                     .unwrap(),
             ),
+            rest_agent: Arc::new(Mutex::new(RestAgent::new(daemon_parallelism, conn_max_age))),
             proxy_limit: Arc::new(BlockingSemaphore::new(*DAEMON_PROXY_MAX_CONCURRENCY)),
             latency: metrics.histogram_vec(
                 HistogramOpts::new("daemon_rpc", "Bitcoind RPC latency (in seconds)"),
@@ -751,13 +801,22 @@ impl Daemon {
             conn: Mutex::new(self.conn.lock().unwrap().reconnect()?),
             message_id: Counter::new(),
             signal: self.signal.clone(),
-            rpc_threads: self.rpc_threads.clone(),
+            request_pool: self.request_pool.clone(),
+            rest_agent: self.rest_agent.clone(),
             proxy_limit: Arc::clone(&self.proxy_limit),
             latency: self.latency.clone(),
             size: self.size.clone(),
             conn_recycle: self.conn_recycle.clone(),
             proxy_rpc: self.proxy_rpc.clone(),
         })
+    }
+
+    pub fn with_request_pool<T, F>(&self, f: F) -> T
+    where
+        T: Send,
+        F: FnOnce() -> T + Send,
+    {
+        self.request_pool.install(f)
     }
 
     #[trace]
@@ -935,14 +994,14 @@ impl Daemon {
     // buffering the replies into a vector. If any of the requests fail, processing is terminated and an Err is returned.
     #[trace]
     fn requests(&self, method: &str, params_list: Vec<Value>) -> Result<Vec<Value>> {
-        self.rpc_threads
+        self.request_pool
             .install(|| self.requests_iter(method, params_list).collect())
     }
 
     // Send requests in parallel over multiple RPC connections, iterating over the results without buffering them.
     // Errors are included in the iterator and do not terminate other pending requests.
     //
-    // IMPORTANT: The returned parallel iterator must be collected inside self.rpc_threads.install()
+    // IMPORTANT: The returned parallel iterator must be collected inside self.request_pool.install()
     // to ensure it runs on the daemon's own thread pool, not the global rayon pool. This is necessary
     // because the per-thread DAEMON_INSTANCE thread-locals would otherwise be shared across different
     // daemon instances in the same process (e.g. during parallel tests).
@@ -954,7 +1013,7 @@ impl Daemon {
     ) -> impl ParallelIterator<Item = Result<Value>> + IndexedParallelIterator + 'a {
         params_list.into_par_iter().map(move |params| {
             // Store a local per-thread Daemon, each with its own TCP connection. These will
-            // get initialized as necessary for the `rpc_threads` pool thread managed by rayon.
+            // get initialized as necessary for the request_pool thread managed by rayon.
             thread_local!(static DAEMON_INSTANCE: OnceCell<Daemon> = OnceCell::new());
 
             DAEMON_INSTANCE.with(|daemon| {
@@ -1004,11 +1063,105 @@ impl Daemon {
         Ok(result)
     }
 
+    /// Send a REST GET, retrying on transport failures and retryable error responses.
+    /// `should_retry` classifies non-200 responses; returning an `Err` aborts the request.
+    fn rest_get<F>(
+        &self,
+        path: &str,
+        mut should_retry: F,
+    ) -> Result<ureq::http::Response<ureq::Body>>
+    where
+        F: FnMut(hyper::StatusCode, &str) -> Result<bool>,
+    {
+        let mut attempts = MAX_ATTEMPTS;
+        loop {
+            attempts -= 1;
+
+            // Reuse the Connection's active address for REST requests,
+            // keeping it as the source of truth for server selection and failover.
+            let (active_addr, conn_established) = self.conn.lock().unwrap().current();
+            let agent = self.rest_agent.lock().unwrap().agent();
+            let url = format!("http://{}/rest/{}", active_addr, path);
+            let request = agent.get(&url).config().http_status_as_error(false).build();
+
+            match request.call() {
+                Ok(response) if response.status() == hyper::StatusCode::OK => return Ok(response),
+                Ok(mut response) => {
+                    let status = response.status();
+                    let body = response.body_mut().read_to_string().map_err(|err| {
+                        ErrorKind::Connection(format!(
+                            "REST request to {} failed reading status {} response: {}",
+                            path, status, err
+                        ))
+                    })?;
+                    // Retry non-200 responses only when `should_retry` explicitly marks them as transient,
+                    // otherwise consider them fatal. Transport failures are retried in the match arm below.
+                    if !should_retry(status, &body)? {
+                        bail!(ErrorKind::Connection(format!(
+                            "REST request to {} failed with status {}: {}",
+                            path, status, body
+                        )))
+                    }
+                    if attempts == 0 {
+                        bail!(ErrorKind::Connection(format!(
+                            "REST request to {} failed with status {} after {} attempts: {}",
+                            path, status, MAX_ATTEMPTS, body
+                        )))
+                    }
+                    warn!(
+                        "REST request to {} failed with status {}: {}, trying {} more times",
+                        path, status, body, attempts
+                    );
+                }
+                Err(err) => {
+                    if attempts == 0 {
+                        bail!(ErrorKind::Connection(format!(
+                            "REST request to {} failed after {} attempts: {:?}",
+                            path, MAX_ATTEMPTS, err
+                        )))
+                    }
+                    {
+                        let mut conn = self.conn.lock().unwrap();
+                        // Trigger the Connection's reconnect selection mechanism on transport failures,
+                        // unless another parallel REST request already replaced this connection.
+                        if conn.established == conn_established {
+                            *conn = conn.reconnect()?;
+                            self.rest_agent.lock().unwrap().recycle();
+                        }
+                    }
+                    warn!(
+                        "REST request to {} failed: {:?}, trying {} more time",
+                        path, err, attempts
+                    );
+                }
+            }
+
+            self.signal.wait(RETRY_WAIT_DURATION, false)?;
+        }
+    }
+
     #[trace]
     pub fn getblock(&self, blockhash: &BlockHash) -> Result<Block> {
-        let block =
-            block_from_value(self.request("getblock", json!([blockhash, /*verbose=*/ false]))?)?;
-        assert_eq!(block.block_hash(), *blockhash);
+        let mut response = self.rest_get(&format!("block/{}.bin", blockhash), |status, body| {
+            // A node can return the header before it finishes indexing the block.
+            Ok(status == hyper::StatusCode::NOT_FOUND
+                && body.contains("not available (not fully downloaded)"))
+        })?;
+        let mut reader = BufReader::new(response.body_mut().as_reader());
+        let block = Block::consensus_decode(&mut reader).chain_err(|| "failed to parse block")?;
+        ensure!(
+            reader
+                .fill_buf()
+                .chain_err(|| "failed to end stream")?
+                .is_empty(),
+            "block response has trailing data"
+        );
+        ensure!(
+            block.block_hash() == *blockhash,
+            "REST block hash mismatch: expected {}, got {}",
+            blockhash,
+            block.block_hash()
+        );
         Ok(block)
     }
 
@@ -1019,39 +1172,12 @@ impl Daemon {
 
     #[trace]
     pub fn getblocks(&self, blockhashes: &[BlockHash]) -> Result<Vec<Block>> {
-        let params_list: Vec<Value> = blockhashes
-            .iter()
-            .map(|hash| json!([hash, /*verbose=*/ false]))
-            .collect();
-
-        let mut attempts = MAX_ATTEMPTS;
-        let values = loop {
-            attempts -= 1;
-
-            match self.requests("getblock", params_list.clone()) {
-                Ok(blocks) => break blocks,
-                Err(e) => {
-                    let err_msg = format!("{e:?}");
-                    if err_msg.contains("Block not found on disk")
-                        || err_msg.contains("Block not available")
-                    {
-                        // There is a small chance the node returns the header but didn't finish to index the block
-                        log::warn!("getblocks failing with: {e:?} trying {attempts} more time")
-                    } else {
-                        panic!("failed to get blocks from bitcoind: {}", err_msg);
-                    }
-                }
-            }
-            if attempts == 0 {
-                panic!("failed to get blocks from bitcoind")
-            }
-            std::thread::sleep(RETRY_WAIT_DURATION);
-        };
-        let mut blocks = vec![];
-        for value in values {
-            blocks.push(block_from_value(value)?);
-        }
-        Ok(blocks)
+        self.with_request_pool(|| {
+            blockhashes
+                .par_iter()
+                .map(|hash| self.getblock(hash))
+                .collect()
+        })
     }
 
     /// Fetch the given transactions in parallel over multiple threads and RPC connections,
@@ -1065,7 +1191,7 @@ impl Daemon {
             .map(|txhash| json!([txhash, /*verbose=*/ false]))
             .collect();
 
-        self.rpc_threads.install(|| {
+        self.request_pool.install(|| {
             self.requests_iter("getrawtransaction", params_list)
                 .zip(txids)
                 .filter_map(|(res, txid)| match res {
@@ -1277,12 +1403,81 @@ impl Daemon {
         // from BTC/kB to sat/b
         Ok(relayfee * 100_000f64)
     }
+
+    /// Fetch spent transaction outputs for the given block via Bitcoin Core's
+    /// REST /rest/spenttxouts/<hash>.bin endpoint.
+    ///
+    /// Returns one Vec<TxOut> per non-coinbase transaction, with TxOuts ordered
+    /// by input index.
+    ///
+    /// Requires bitcoind started with -rest=1.
+    #[cfg(not(feature = "liquid"))]
+    pub fn get_spent_txouts(&self, blockhash: &BlockHash) -> Result<Vec<Vec<bitcoin::TxOut>>> {
+        let mut response = self.rest_get(
+            &format!("spenttxouts/{}.bin", blockhash),
+            |status, body| {
+                bail!(ErrorKind::Connection(format!(
+                    "REST spenttxouts failed for {} with status {} (is bitcoind running with -rest=1?): {}",
+                    blockhash, status, body
+                )))
+            },
+        )?;
+        let mut reader = BufReader::new(response.body_mut().as_reader());
+        parse_spent_txouts(&mut reader)
+    }
+}
+
+#[cfg(not(feature = "liquid"))]
+fn parse_spent_txouts<R: bitcoin::io::BufRead + ?Sized>(
+    reader: &mut R,
+) -> Result<Vec<Vec<bitcoin::TxOut>>> {
+    // The binary spenttxouts format is: the CompactSize tx count, then for each tx the CompactSize TxOut count followed by the TxOuts.
+    // Entry 0 is an empty coinbase placeholder, which we drop from the final returned structure.
+    let tx_count = VarInt::consensus_decode(reader)
+        .chain_err(|| "failed to parse spenttxouts tx count")?
+        .0 as usize;
+
+    ensure!(tx_count > 0, "spenttxouts response is empty");
+
+    let coinbase_input_count = VarInt::consensus_decode(reader)
+        .chain_err(|| "failed to parse spenttxouts coinbase placeholder")?
+        .0;
+    ensure!(
+        coinbase_input_count == 0,
+        "spenttxouts coinbase placeholder is not empty"
+    );
+
+    let mut spenttxouts = Vec::with_capacity(tx_count - 1);
+    for _ in 1..tx_count {
+        let input_count = VarInt::consensus_decode(reader)
+            .chain_err(|| "failed to parse spenttxouts input count")?
+            .0 as usize;
+        let mut prevouts = Vec::with_capacity(input_count);
+        for _ in 0..input_count {
+            prevouts.push(
+                bitcoin::TxOut::consensus_decode(reader)
+                    .chain_err(|| "failed to parse spenttxout")?,
+            );
+        }
+        spenttxouts.push(prevouts);
+    }
+
+    ensure!(
+        reader
+            .fill_buf()
+            .chain_err(|| "failed to end stream")?
+            .is_empty(),
+        "spenttxouts response has trailing data"
+    );
+
+    Ok(spenttxouts)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         parse_jsonrpc_reply, recycle_due, BlockingSemaphore, ConnectionConfig, CookieGetter,
+        RestAgent,
     };
     use crate::errors::{Error, ErrorKind, Result};
     use crate::signal::Waiter;
@@ -1450,6 +1645,29 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
         drop(permit);
         assert!(waiter.join().unwrap());
+    }
+
+    #[test]
+    fn rest_agent_recycles_after_max_age() {
+        let mut rest_agent = RestAgent::new(1, MAX_AGE);
+        let pool_created = rest_agent.pool_created;
+        let _ = rest_agent.agent();
+        assert_eq!(rest_agent.pool_created, pool_created);
+
+        rest_agent.pool_created = Instant::now() - (MAX_AGE.unwrap() + secs(1));
+        let expired_pool_created = rest_agent.pool_created;
+        let _ = rest_agent.agent();
+        assert!(rest_agent.pool_created > expired_pool_created);
+
+        let pool_created = rest_agent.pool_created;
+        let _ = rest_agent.agent();
+        assert_eq!(rest_agent.pool_created, pool_created);
+
+        let mut unlimited_agent = RestAgent::new(1, None);
+        unlimited_agent.pool_created = Instant::now() - secs(100_000);
+        let unlimited_created = unlimited_agent.pool_created;
+        let _ = unlimited_agent.agent();
+        assert_eq!(unlimited_agent.pool_created, unlimited_created);
     }
 
     #[test]
