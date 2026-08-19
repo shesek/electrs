@@ -528,6 +528,20 @@ impl Config {
         // Base verbosity is 2 (Info), each -v flag adds one level:
         // no flags = Info, -v = Debug, -vv = Trace
         log.verbosity(2 + m.occurrences_of("verbosity") as usize);
+
+        // Use a white-list to exclude ureq-proto, which dumps binary REST responses in its trace logs
+        log.modules([
+            // local binaries
+            "electrs",
+            "popular_scripts",
+            "tx_fingerprint_stats",
+            // external crates
+            "electrum_client",
+            "reqwest",
+            "rustls",
+            "tiny_http",
+            "ureq",
+        ]);
         log.timestamp(if m.is_present("timestamp") {
             stderrlog::Timestamp::Millisecond
         } else {
